@@ -21,11 +21,38 @@ const PROVIDERS: { value: AIProvider; label: string }[] = [
 ]
 
 export function ApiKeyManager() {
-    const { apiKeys, addApiKey, updateApiKey, deleteApiKey } = useChatStore()
+    const { apiKeys, addApiKey, updateApiKey, deleteApiKey, setApiKeys } = useChatStore()
     const mounted = useMounted()
 
     // Prevent hydration mismatch
     const displayKeys = mounted ? apiKeys : []
+
+    // Auto-Cleanup: Remove duplicate IDs caused by previous bug
+    // This fixes React render issues and "ghost" keys
+    useState(() => {
+        if (!mounted) return
+
+        const seen = new Set()
+        const uniqueKeys: import("@/store/chat-store").ApiKey[] = []
+        let hasDuplicates = false
+
+        // We read directly from store state to avoid dependency loops if we relied on the hook's return
+        const currentKeys = useChatStore.getState().apiKeys
+
+        currentKeys.forEach(k => {
+            if (!seen.has(k.id)) {
+                seen.add(k.id)
+                uniqueKeys.push(k)
+            } else {
+                hasDuplicates = true
+            }
+        })
+
+        if (hasDuplicates) {
+            console.log("Cleaning up duplicate keys...")
+            useChatStore.getState().setApiKeys(uniqueKeys)
+        }
+    })
 
     const [newKey, setNewKey] = useState("")
     const [newLimit, setNewLimit] = useState(0)

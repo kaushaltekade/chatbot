@@ -27,7 +27,16 @@ export class OpenAIProvider implements LLMProvider {
             // Intelligent Context Pruning: Keep System Prompt + Last 10 messages
             const systemMessage = messages.find(m => m.role === 'system')
             const recentMessages = messages.filter(m => m.role !== 'system').slice(-10)
-            const finalMessages = systemMessage ? [systemMessage, ...recentMessages] : recentMessages
+
+            // Force English Rule:
+            // Some models (Groq/DeepSeek) can default to Chinese. We enforce English here.
+            const forcedSystemPrompt = {
+                role: 'system',
+                content: (systemMessage ? systemMessage.content + "\n\n" : "") +
+                    "IMPORTANT RULE: You MUST always respond in English, regardless of the user's input language, unless explicitly asked to translate. Do not output Chinese."
+            }
+
+            const finalMessages = [forcedSystemPrompt, ...recentMessages]
 
             const response = await fetch(this.baseUrl, {
                 method: "POST",
