@@ -10,6 +10,7 @@ export interface ApiKey {
     key: string
     usage: number // Tokens used or remaining (depends on provider logic)
     limit?: number
+    rateLimitedUntil?: number // Timestamp when the key can be used again
     isActive: boolean
     label?: string
 }
@@ -46,6 +47,7 @@ interface ChatStore {
     selectConversation: (id: string) => void
     addMessage: (message: Message) => void
     updateMessage: (id: string, content: string) => void
+    deleteMessage: (id: string) => void
     setLoading: (loading: boolean) => void
 
     // Basic UI state
@@ -58,7 +60,15 @@ export const useChatStore = create<ChatStore>()(
         (set) => ({
             apiKeys: [],
             setApiKeys: (keys) => set({ apiKeys: keys }),
-            addApiKey: (key) => set((state) => ({ apiKeys: [...state.apiKeys, key] })),
+            addApiKey: (key) => set((state) => {
+                const exists = state.apiKeys.some(k => k.id === key.id)
+                if (exists) {
+                    return {
+                        apiKeys: state.apiKeys.map(k => k.id === key.id ? key : k)
+                    }
+                }
+                return { apiKeys: [...state.apiKeys, key] }
+            }),
             updateApiKey: (id, updates) =>
                 set((state) => ({
                     apiKeys: state.apiKeys.map((k) => (k.id === id ? { ...k, ...updates } : k)),
@@ -107,6 +117,17 @@ export const useChatStore = create<ChatStore>()(
                     const newMessages = state.messages.map(m =>
                         m.id === id ? { ...m, content } : m
                     )
+                    const updatedConversations = state.conversations.map(c =>
+                        c.id === state.activeConversationId
+                            ? { ...c, messages: newMessages }
+                            : c
+                    )
+                    return { messages: newMessages, conversations: updatedConversations }
+                })
+            },
+            deleteMessage: (id) => {
+                set(state => {
+                    const newMessages = state.messages.filter(m => m.id !== id)
                     const updatedConversations = state.conversations.map(c =>
                         c.id === state.activeConversationId
                             ? { ...c, messages: newMessages }

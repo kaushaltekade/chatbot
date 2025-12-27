@@ -21,7 +21,7 @@ const PROVIDERS: { value: AIProvider; label: string }[] = [
 ]
 
 export function ApiKeyManager() {
-    const { apiKeys, addApiKey, deleteApiKey } = useChatStore()
+    const { apiKeys, addApiKey, updateApiKey, deleteApiKey } = useChatStore()
     const mounted = useMounted()
 
     // Prevent hydration mismatch
@@ -126,7 +126,14 @@ export function ApiKeyManager() {
                             )}
                             {displayKeys.map((key) => (
                                 <TableRow key={key.id}>
-                                    <TableCell className="font-medium capitalize">{key.provider}</TableCell>
+                                    <TableCell className="font-medium capitalize">
+                                        <div className="flex flex-col">
+                                            <span>{key.provider}</span>
+                                            {key.label && key.label !== key.provider && (
+                                                <span className="text-xs text-muted-foreground">{key.label}</span>
+                                            )}
+                                        </div>
+                                    </TableCell>
                                     <TableCell className="font-mono text-xs">
                                         <div className="flex items-center gap-2">
                                             {showKey[key.id] ? key.key : "•".repeat(20) + key.key.slice(-4)}
@@ -164,8 +171,28 @@ export function ApiKeyManager() {
                                     </TableCell>
                                     <TableCell>
                                         <div className="flex items-center gap-2">
-                                            <span className={cn("h-2 w-2 rounded-full", key.isActive ? "bg-green-500" : "bg-gray-300")} />
-                                            {key.isActive ? "Active" : "Inactive"}
+                                            {(key.rateLimitedUntil && key.rateLimitedUntil > Date.now()) ? (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-bold text-red-500">Locked</span>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-6 text-[10px] px-2"
+                                                        onClick={() => updateApiKey(key.id, { rateLimitedUntil: undefined, isActive: true })}
+                                                    >
+                                                        Unlock
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <Button
+                                                    variant={key.isActive ? "default" : "secondary"}
+                                                    size="sm"
+                                                    className={cn("h-6 text-[10px] px-2", key.isActive ? "bg-green-600 hover:bg-green-700" : "text-muted-foreground")}
+                                                    onClick={() => updateApiKey(key.id, { isActive: !key.isActive })}
+                                                >
+                                                    {key.isActive ? "Enabled" : "Disabled"}
+                                                </Button>
+                                            )}
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-right">

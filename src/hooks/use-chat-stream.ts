@@ -9,6 +9,7 @@ export function useChatStream() {
         messages,
         addMessage,
         updateMessage,
+        deleteMessage,
         setLoading,
         apiKeys,
         updateApiKey
@@ -16,48 +17,38 @@ export function useChatStream() {
 
     const [input, setInput] = useState("")
 
-    const getBestApiKey = (providerId?: string) => {
-        // 1. Try to find key for specific provider if requested
-        if (providerId) {
-            const specificKeys = apiKeys.filter(k => k.provider === providerId && k.isActive)
-            if (specificKeys.length > 0) {
-                const sorted = sortKeys(specificKeys)
-                console.log(`[getBestApiKey] Selected key for ${providerId}: ${sorted[0].id} (Remaining: ${sorted[0].limit ? sorted[0].limit - sorted[0].usage : '∞'})`)
-                return sorted[0]
-            }
-        }
-
-        // 2. Fallback: Find ANY active key
-        const allActiveKeys = apiKeys.filter(k => k.isActive)
-        if (allActiveKeys.length === 0) {
-            console.warn(`[getBestApiKey] No active keys found for any provider`)
-            return null
-        }
-
-        const sorted = sortKeys(allActiveKeys)
-        console.log(`[getBestApiKey] Selected fallback key: ${sorted[0].id} (Remaining: ${sorted[0].limit ? sorted[0].limit - sorted[0].usage : '∞'})`)
-        return sorted[0]
-    }
-
     const sortKeys = (keys: typeof apiKeys) => {
         return keys.sort((a, b) => {
-            const remainingA = a.limit && a.limit > 0 ? a.limit - a.usage : Number.MAX_SAFE_INTEGER
-            const remainingB = b.limit && b.limit > 0 ? b.limit - b.usage : Number.MAX_SAFE_INTEGER
+            // Treat active keys as priority
+            if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+
+            // Calculate remaining tokens (Infinity if no limit)
+            const remainingA = (a.limit && a.limit > 0) ? a.limit - (a.usage || 0) : Number.MAX_SAFE_INTEGER
+            const remainingB = (b.limit && b.limit > 0) ? b.limit - (b.usage || 0) : Number.MAX_SAFE_INTEGER
+
             return remainingB - remainingA
         })
+    }
+
+    const getOrderedKeys = () => {
+        const now = Date.now()
+        const activeKeys = apiKeys.filter(k => {
+            if (!k.isActive) return false
+            if (k.rateLimitedUntil && k.rateLimitedUntil > now) return false
+            return true
+        })
+        return sortKeys(activeKeys)
     }
 
     const handleSubmit = async (e?: React.FormEvent) => {
         e?.preventDefault()
         if (!input.trim()) return
 
-        // Try to get OpenAI first, but fallback to anything available
-        const apiKey = getBestApiKey("openai") || getBestApiKey()
+        const keysToTry = getOrderedKeys()
 
-        if (!apiKey) {
-            const msg = "No active API keys found. Please add a key in Settings for OpenAI or any other provider."
+        if (keysToTry.length === 0) {
+            const msg = "No active API keys found. Please add a key in Settings."
             toast.error(msg)
-            console.error(msg)
             return
         }
 
@@ -72,8 +63,8 @@ export function useChatStream() {
         setInput("")
         setLoading(true)
 
-        // Initial Assistant Message
-        const assistantMsgId = generateId()
+        // Initial Assistant Message placeholder
+        let assistantMsgId = generateId()
         addMessage({
             id: assistantMsgId,
             role: "assistant",
@@ -81,75 +72,165 @@ export function useChatStream() {
             tokens: 0
         })
 
-        try {
-            const response = await fetch("/api/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    messages: [...messages, userMsg].map(m => ({ role: m.role, content: m.content })),
-                    providerId: apiKey.provider,
-                    apiKey: apiKey.key
-                })
-            })
+        let lastError: Error | null = null
+        let success = false
 
-            if (!response.ok) {
-                const err = await response.json()
-                throw new Error(err.error || "Failed to fetch response")
-            }
+        for (const apiKey of keysToTry) {
+            try {
+                if (lastError) {
+                    toast.warning(`Switching to ${apiKey.provider}...`)
+                }
 
-            if (!response.body) throw new Error("No response body")
+                console.log(`[Chat] Trying provider: ${apiKey.provider} (${apiKey.id})`)
 
-            const reader = response.body.getReader()
-            const decoder = new TextDecoder()
-            let assistantContent = ""
+                const isFirstTry = keysToTry.indexOf(apiKey) === 0
+                const timeoutDuration = isFirstTry ? 5000 : 20000
 
-            while (true) {
-                const { done, value } = await reader.read()
-                if (done) break
+                const controller = new AbortController()
+                const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
 
-                const chunk = decoder.decode(value)
-                const lines = chunk.split("\n\n")
+                try {
+                    const response = await fetch("/api/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            messages: [...messages, userMsg].map(m => ({ role: m.role, content: m.content })),
+                            providerId: apiKey.provider,
+                            apiKey: apiKey.key
+                        }),
+                        signal: controller.signal
+                    })
 
-                for (const line of lines) {
-                    if (line.startsWith("data: ")) {
-                        try {
-                            const data = JSON.parse(line.slice(6))
-                            if (data.isDone) continue
+                    if (!response.ok) {
+                        const err = await response.json()
+                        throw new Error(err.error || `Failed to fetch response from ${apiKey.provider}`)
+                    }
 
-                            if (data.content) {
-                                assistantContent += data.content
-                                updateMessage(assistantMsgId, assistantContent)
-                            }
-                        } catch (e) {
-                            // ignore parse errors for partial chunks
+                    if (!response.body) throw new Error("No response body")
+
+                    const reader = response.body.getReader()
+                    const decoder = new TextDecoder()
+                    let assistantContent = ""
+                    let isFirstChunk = true
+
+                    while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+
+                        // Clear timeout only after we receive the first byte of body data
+                        // This prevents hanging on "headers received" but "no data" states
+                        if (isFirstChunk) {
+                            clearTimeout(timeoutId)
+                            isFirstChunk = false
                         }
+
+                        const chunk = decoder.decode(value)
+                        const lines = chunk.split("\n\n")
+
+                        for (const line of lines) {
+                            if (line.startsWith("data: ")) {
+                                try {
+                                    const data = JSON.parse(line.slice(6))
+                                    if (data.isDone) continue
+
+                                    if (data.content) {
+                                        assistantContent += data.content
+                                        updateMessage(assistantMsgId, assistantContent)
+                                    }
+                                } catch (e) {
+                                    // ignore parse errors for partial chunks
+                                }
+                            }
+                        }
+                    }
+
+                    if (!assistantContent) {
+                        throw new Error("Received empty response from provider")
+                    }
+
+                    // Finalize Token Usage
+                    const inputTokens = userMsg.tokens || 0
+                    const outputTokens = estimateTokens(assistantContent)
+                    const totalCost = inputTokens + outputTokens
+
+                    updateApiKey(apiKey.id, {
+                        usage: (apiKey.usage || 0) + totalCost
+                    })
+
+                    updateMessage(assistantMsgId, assistantContent)
+                    success = true
+                    break // Stop loop on success
+
+                } catch (innerError: any) {
+                    clearTimeout(timeoutId)
+                    if (innerError.name === 'AbortError') {
+                        throw new Error(`Connection timed out after ${timeoutDuration / 1000}s`)
+                    }
+                    throw innerError
+                }
+
+            } catch (error: any) {
+                console.error(`Error with ${apiKey.provider}:`, error)
+                lastError = error
+
+                // Smart Disabling: If error is permanent (Quota/Auth), lock the key for 24 hours
+                const isFatal =
+                    error.message.includes("Quota") ||
+                    error.message.includes("Insufficient") ||
+                    error.message.includes("401") ||
+                    error.message.includes("429") ||
+                    error.message.includes("Invalid")
+
+                if (isFatal) {
+                    const twentyFourHours = 24 * 60 * 60 * 1000
+                    updateApiKey(apiKey.id, {
+                        rateLimitedUntil: Date.now() + twentyFourHours,
+                        label: `${apiKey.label || apiKey.provider} (Locked 24h)`
+                    })
+                    toast.error(`${apiKey.provider} locked for 24h (Quota/Limit).`)
+                }
+
+                // Show switch message in chat
+                if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
+                    const nextProvider = keysToTry[keysToTry.indexOf(apiKey) + 1].provider
+
+                    // REORDERING LOGIC:
+                    // 1. Delete the "Thinking" placeholder that failed (to remove the "Error" bubble)
+                    deleteMessage(assistantMsgId)
+
+                    // 2. Add the System Info Message (Pill)
+                    const switchMsg: Message = {
+                        id: generateId(),
+                        role: "system",
+                        content: `⚠️ Error with ${apiKey.provider}: ${error.message}\n🔄 Switching to ${nextProvider}...`,
+                        tokens: 0
+                    }
+                    addMessage(switchMsg)
+
+                    // 3. Create a NEW "Thinking" placeholder for the next try
+                    assistantMsgId = generateId()
+                    addMessage({
+                        id: assistantMsgId,
+                        role: "assistant",
+                        content: "",
+                        tokens: 0
+                    })
+
+                    // Only show the "Switching" toast if we didn't just show a "Disabled" toast (to avoid spam)
+                    if (!isFatal) {
+                        toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}...`)
                     }
                 }
             }
-
-            // Finalize Token Usage
-            const inputTokens = userMsg.tokens || 0
-            const outputTokens = estimateTokens(assistantContent)
-            const totalCost = inputTokens + outputTokens
-
-            // Update Key Usage
-            // Note: Ideally this should happen atomically or be verified by backend
-            updateApiKey(apiKey.id, {
-                usage: (apiKey.usage || 0) + totalCost
-            })
-
-            // Update message token count
-            updateMessage(assistantMsgId, assistantContent) // Ensure final content
-            // Note: I can't easily update 'tokens' property on message with 'updateMessage' currently as it only takes content
-            // I might need to expand updateMessage signature later.
-
-        } catch (error: any) {
-            console.error(error)
-            toast.error(error.message)
-            updateMessage(assistantMsgId, "Error: " + error.message)
-        } finally {
-            setLoading(false)
         }
+
+        if (!success) {
+            const finalErrorMsg = lastError?.message || "All providers failed."
+            toast.error(finalErrorMsg)
+            updateMessage(assistantMsgId, "Error: " + finalErrorMsg)
+        }
+
+        setLoading(false)
     }
 
     return {

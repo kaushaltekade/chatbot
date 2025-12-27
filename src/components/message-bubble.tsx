@@ -11,7 +11,16 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ role, content }: MessageBubbleProps) {
-    if (role === "system") return null
+    if (role === "system") {
+        return (
+            <div className="flex w-full justify-center my-4">
+                <div className="bg-muted/50 border border-border/50 text-muted-foreground text-xs px-4 py-1.5 rounded-full flex items-center gap-2 shadow-sm">
+                    <div className="w-4 h-4 rounded-full bg-yellow-500/10 text-yellow-500 flex items-center justify-center font-bold text-[10px] border border-yellow-500/20">!</div>
+                    <span className="font-medium">{content}</span>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className={cn(

@@ -7,6 +7,24 @@ import { GeminiProvider } from "@/services/llm/gemini"
 const providers = {
     'openai': new OpenAIProvider(),
     'gemini': new GeminiProvider(),
+    'deepseek': new OpenAIProvider({
+        id: 'deepseek',
+        name: 'DeepSeek V3 (Hyperbolic)',
+        baseUrl: 'https://api.hyperbolic.xyz/v1/chat/completions',
+        model: 'deepseek-ai/DeepSeek-V3'
+    }),
+    'groq': new OpenAIProvider({
+        id: 'groq',
+        name: 'Groq (Llama 3.3)',
+        baseUrl: 'https://api.groq.com/openai/v1/chat/completions',
+        model: 'llama-3.3-70b-versatile'
+    }),
+    'mistral': new OpenAIProvider({
+        id: 'mistral',
+        name: 'Mistral AI',
+        baseUrl: 'https://api.mistral.ai/v1/chat/completions',
+        model: 'mistral-large-latest'
+    }),
 }
 
 export async function POST(req: NextRequest) {
@@ -47,7 +65,8 @@ export async function POST(req: NextRequest) {
         })
 
     } catch (error: any) {
-        console.error("API Route Error:", error)
+        // Log as warning to avoid scary red text in terminal for expected errors (like quota exhausted)
+        console.warn("API Route Error (Handled):", error.message)
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }

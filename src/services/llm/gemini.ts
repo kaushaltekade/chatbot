@@ -3,7 +3,7 @@ import { estimateTokens } from "@/lib/token-utils"
 
 export class GeminiProvider implements LLMProvider {
     id = "gemini"
-    name = "Google Gemini"
+    name = "Google Gemini 2.5 Flash"
 
     estimateTokens(text: string): number {
         return estimateTokens(text)
@@ -30,9 +30,9 @@ export class GeminiProvider implements LLMProvider {
                 ? { parts: [{ text: systemMessage.content }] }
                 : undefined
 
-            // Use gemini-1.5-flash-latest which is often more reliable for alias resolution or gemini-pro
+            // Use gemini-2.5-flash which is the requested model
             const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:streamGenerateContent?key=${apiKey}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=${apiKey}`,
                 {
                     method: "POST",
                     headers: {
@@ -50,9 +50,26 @@ export class GeminiProvider implements LLMProvider {
             )
 
             if (!response.ok) {
-                const error = await response.json()
-                console.error("Gemini API Raw Error:", JSON.stringify(error, null, 2))
-                throw new Error(error.error?.message || "Gemini API Error")
+                const status = response.status
+                const statusText = response.statusText
+                let errorMessage = `Gemini API Error: ${status} ${statusText}`
+
+                try {
+                    const error = await response.json()
+                    console.error("Gemini API Raw Error:", JSON.stringify(error, null, 2))
+                    if (error.error?.message) {
+                        errorMessage = `Gemini Error: ${error.error.message}`
+                    }
+                } catch (e) {
+                    // Could not parse JSON, use text if available
+                    const text = await response.text()
+                    console.error("Gemini API Raw Text:", text)
+                    if (text) {
+                        errorMessage += ` - ${text.slice(0, 200)}`
+                    }
+                }
+
+                throw new Error(errorMessage)
             }
 
             const reader = response.body?.getReader()
@@ -67,8 +84,8 @@ export class GeminiProvider implements LLMProvider {
                 const chunk = decoder.decode(value, { stream: true })
                 this.processBuffer(chunk, onChunk)
             }
-        } catch (error) {
-            console.error("Gemini Provider Error:", error)
+        } catch (error: any) {
+            console.warn("Gemini Provider Error (Handled):", error.message)
             throw error
         }
     }
