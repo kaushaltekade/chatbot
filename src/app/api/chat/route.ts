@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { OpenAIProvider } from "@/services/llm/openai"
 
+import { GeminiProvider } from "@/services/llm/gemini"
+
 // Map of providers
 const providers = {
     'openai': new OpenAIProvider(),
-    // 'gemini': new GeminiProvider(),
+    'gemini': new GeminiProvider(),
 }
 
 export async function POST(req: NextRequest) {

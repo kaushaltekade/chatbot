@@ -9,7 +9,6 @@ export async function createClient() {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
         {
             cookies: {
-                timeout: 10000,
                 getAll() {
                     return cookieStore.getAll()
                 },
