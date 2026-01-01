@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { MessageBubble } from "@/components/message-bubble"
 import { Menu, Send, Bot, User, RotateCcw } from "lucide-react"
+import { estimateTokens } from "@/lib/token-utils"
 
 export default function Home() {
   const { isSidebarOpen, toggleSidebar } = useChatStore()
@@ -74,14 +75,23 @@ export default function Home() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Message ChatGPT..."
-                  className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-5 py-3.5 h-auto min-h-[52px] max-h-48 resize-none"
+                  className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-5 py-3.5 h-auto min-h-[52px] max-h-48 resize-none mb-6"
                   autoFocus
                 />
+
+                {/* Token Counter */}
+                <div className={cn(
+                  "absolute bottom-3 left-6 text-[10px] font-mono pointer-events-none transition-colors",
+                  estimateTokens(input) > 2000 ? "text-red-500 font-bold" : "text-muted-foreground/60"
+                )}>
+                  {input.length > 0 && `${estimateTokens(input)} tokens`}
+                </div>
+
                 <Button
                   type="submit"
                   size="icon"
                   disabled={!input.trim()}
-                  className="absolute right-2 bottom-2 h-8 w-8 rounded-full mb-0.5 transition-all disabled:opacity-20 hover:scale-105 active:scale-95"
+                  className="absolute right-2 bottom-2 h-8 w-8 rounded-full mb-0.5 transition-all disabled:opacity-20 hover:scale-105 active:scale-95 z-10"
                 >
                   <Send className="w-4 h-4" />
                 </Button>

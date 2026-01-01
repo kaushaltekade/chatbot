@@ -207,10 +207,21 @@ export function useChatStream() {
                     const inputTokens = userMsg.tokens || 0
                     const outputTokens = estimateTokens(assistantContent)
                     const totalCost = inputTokens + outputTokens
+                    const newUsage = (apiKey.usage || 0) + totalCost
 
                     updateApiKey(apiKey.id, {
-                        usage: (apiKey.usage || 0) + totalCost
+                        usage: newUsage
                     })
+
+                    // LIMIT WARNING LOGIC
+                    if (apiKey.limit && apiKey.limit > 0) {
+                        const percentage = newUsage / apiKey.limit
+                        if (percentage >= 0.9) {
+                            toast.error(`CRITICAL: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}`)
+                        } else if (percentage >= 0.8) {
+                            toast.warning(`Alert: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}`)
+                        }
+                    }
 
                     updateMessage(assistantMsgId, assistantContent)
                     success = true
@@ -228,32 +239,19 @@ export function useChatStream() {
                 console.error(`Error with ${apiKey.provider}:`, error)
                 lastError = error
 
-                console.error(`Error with ${apiKey.provider}:`, error)
-                lastError = error
-
                 // LOCK LOGIC:
-                // User requested strict failover: If an API fails, disable it for 24 hours.
-                // This prevents repeated "Switching..." delays on subsequent messages.
                 const twentyFourHours = 24 * 60 * 60 * 1000
                 updateApiKey(apiKey.id, {
                     rateLimitedUntil: Date.now() + twentyFourHours,
                     label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
                 })
 
-                // Show toast for the lock action
-                // We use a simplified message to not spam the user too much, as the 'Switching' toast is more important.
-                // toast.error(`${apiKey.provider} failed and is temporarily locked.`) 
-                // Actually, let's stick to the "Switching" toast being the primary notification.
-
                 // Show switch message in chat
                 if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
                     const nextProvider = keysToTry[keysToTry.indexOf(apiKey) + 1].provider
 
                     // REORDERING LOGIC:
-                    // 1. Delete the "Thinking" placeholder that failed
                     deleteMessage(assistantMsgId)
-
-                    // 2.Create a NEW "Thinking" placeholder for the next try
                     assistantMsgId = generateId()
                     addMessage({
                         id: assistantMsgId,
@@ -262,9 +260,11 @@ export function useChatStream() {
                         tokens: 0
                     })
 
-                    // Only show the "Switching" toast
-                    toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}...`, {
-                        position: 'bottom-right'
+                    // Explicitly notify user about context preservation
+                    toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}... (Context Preserved)`, {
+                        description: "Your full conversation history is being sent to the next provider.",
+                        position: 'bottom-right',
+                        duration: 5000
                     })
                 }
             }
