@@ -3,6 +3,7 @@ import { OpenAIProvider } from "@/services/llm/openai"
 
 import { GeminiProvider } from "@/services/llm/gemini"
 import { CohereProvider } from "@/services/llm/cohere"
+import { AnthropicProvider } from "@/services/llm/anthropic"
 
 // Map of providers
 const providers = {
@@ -54,8 +55,7 @@ const providers = {
             "X-Title": "Local Chatbot"
         }
     }),
-    // Anthropic requires custom provider (In Progress)
-    'anthropic': new OpenAIProvider({ id: 'anthropic', name: 'Anthropic (Coming Soon)' }),
+    'anthropic': new AnthropicProvider(),
     'cohere': new CohereProvider({ model: 'command-r-plus-08-2024' }),
 }
 

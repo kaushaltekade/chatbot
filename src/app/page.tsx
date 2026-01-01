@@ -9,11 +9,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { MessageBubble } from "@/components/message-bubble"
-import { Menu, Send, Bot, User } from "lucide-react"
+import { Menu, Send, Bot, User, RotateCcw } from "lucide-react"
 
 export default function Home() {
   const { isSidebarOpen, toggleSidebar } = useChatStore()
-  const { messages, input, setInput, handleSubmit } = useChatStream()
+  const { messages, input, setInput, handleSubmit, handleRegenerate, isLoading } = useChatStream()
   const mounted = useMounted()
 
   // Prevent hydration mismatch by defaulting to open (server state) until mounted
@@ -80,13 +80,30 @@ export default function Home() {
                   <Send className="w-4 h-4" />
                 </Button>
               </form>
+
+              {/* Regenerate Button Helper */}
+              {!isLoading && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+                <div className="absolute -top-12 right-0 flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRegenerate}
+                    className="text-xs flex items-center gap-1 h-8 bg-background/80 backdrop-blur"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Regenerate
+                  </Button>
+                </div>
+              )}
+
               <div className="text-xs text-center text-muted-foreground mt-2">
                 Multi-AI Chat can make mistakes. Check important info.
               </div>
             </div>
           </div>
         </main>
-      </div>
-    </div>
+      </div >
+    </div >
   );
 }

@@ -11,6 +11,7 @@ export function useChatStream() {
         updateMessage,
         deleteMessage,
         setLoading,
+        isLoading,
         apiKeys,
         updateApiKey
     } = useChatStore()
@@ -30,21 +31,72 @@ export function useChatStream() {
         })
     }
 
-    const getOrderedKeys = () => {
+    const getOrderedKeys = (inputPrompt: string) => {
+        const { smartRoutingEnabled } = useChatStore.getState()
         const now = Date.now()
-        const activeKeys = apiKeys.filter(k => {
+        let activeKeys = apiKeys.filter(k => {
             if (!k.isActive) return false
             if (k.rateLimitedUntil && k.rateLimitedUntil > now) return false
             return true
         })
-        return sortKeys(activeKeys)
+
+        if (!smartRoutingEnabled) {
+            return sortKeys(activeKeys)
+        }
+
+        // --- SMART ROUTING LOGIC ---
+        const lowerPrompt = inputPrompt.toLowerCase()
+
+        // 1. CODING
+        const codingKeywords = ['code', 'function', 'script', 'react', 'typescript', 'python', 'html', 'css', 'sql', 'bug', 'error', 'debug', 'json', 'api', 'component', 'class', 'method']
+        const isCoding = codingKeywords.some(k => lowerPrompt.includes(k))
+
+        // 2. REASONING / MATH
+        const reasoningKeywords = ['math', 'solve', 'calculate', 'proof', 'theorem', 'logic', 'analyze', 'explain', 'why']
+        const isReasoning = reasoningKeywords.some(k => lowerPrompt.includes(k))
+
+        // 3. SEARCH / CURRENT EVENTS
+        const searchKeywords = ['search', 'find', 'latest', 'news', 'price', 'weather', 'who is', 'what is', 'current']
+        const isSearch = searchKeywords.some(k => lowerPrompt.includes(k))
+
+        return activeKeys.sort((a, b) => {
+            let scoreA = 0
+            let scoreB = 0
+
+            // Helper to score providers
+            const getScore = (p: string) => {
+                if (isCoding) {
+                    if (p === 'deepseek' || p === 'anthropic' || p === 'mistral') return 10
+                    if (p === 'openai') return 8
+                }
+                if (isReasoning) {
+                    if (p === 'deepseek' || p === 'openai' || p === 'anthropic') return 10
+                    if (p === 'cohere') return 8
+                }
+                if (isSearch) {
+                    if (p.includes('perplexity')) return 10
+                    if (p === 'gemini') return 8 // Gemini has search grounding often
+                }
+                return 0
+            }
+
+            scoreA = getScore(a.provider)
+            scoreB = getScore(b.provider)
+
+            if (scoreA !== scoreB) return scoreB - scoreA // Higher score first
+
+            // Fallback to remaining tokens/limit logic
+            const remainingA = (a.limit && a.limit > 0) ? a.limit - (a.usage || 0) : Number.MAX_SAFE_INTEGER
+            const remainingB = (b.limit && b.limit > 0) ? b.limit - (b.usage || 0) : Number.MAX_SAFE_INTEGER
+            return remainingB - remainingA
+        })
     }
 
     const handleSubmit = async (e?: React.FormEvent) => {
         e?.preventDefault()
         if (!input.trim()) return
 
-        const keysToTry = getOrderedKeys()
+        const keysToTry = getOrderedKeys(input)
 
         if (keysToTry.length === 0) {
             const msg = "No active API keys found. Please add a key in Settings."
@@ -176,41 +228,32 @@ export function useChatStream() {
                 console.error(`Error with ${apiKey.provider}:`, error)
                 lastError = error
 
-                // Smart Disabling: If error is permanent (Quota/Auth), lock the key for 24 hours
-                const isFatal =
-                    error.message.includes("Quota") ||
-                    error.message.includes("Insufficient") ||
-                    error.message.includes("401") ||
-                    error.message.includes("429") ||
-                    error.message.includes("Invalid")
+                console.error(`Error with ${apiKey.provider}:`, error)
+                lastError = error
 
-                if (isFatal) {
-                    const twentyFourHours = 24 * 60 * 60 * 1000
-                    updateApiKey(apiKey.id, {
-                        rateLimitedUntil: Date.now() + twentyFourHours,
-                        label: `${apiKey.label || apiKey.provider} (Locked 24h)`
-                    })
-                    toast.error(`${apiKey.provider} locked for 24h (Quota/Limit).`)
-                }
+                // LOCK LOGIC:
+                // User requested strict failover: If an API fails, disable it for 24 hours.
+                // This prevents repeated "Switching..." delays on subsequent messages.
+                const twentyFourHours = 24 * 60 * 60 * 1000
+                updateApiKey(apiKey.id, {
+                    rateLimitedUntil: Date.now() + twentyFourHours,
+                    label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
+                })
+
+                // Show toast for the lock action
+                // We use a simplified message to not spam the user too much, as the 'Switching' toast is more important.
+                // toast.error(`${apiKey.provider} failed and is temporarily locked.`) 
+                // Actually, let's stick to the "Switching" toast being the primary notification.
 
                 // Show switch message in chat
                 if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
                     const nextProvider = keysToTry[keysToTry.indexOf(apiKey) + 1].provider
 
                     // REORDERING LOGIC:
-                    // 1. Delete the "Thinking" placeholder that failed (to remove the "Error" bubble)
+                    // 1. Delete the "Thinking" placeholder that failed
                     deleteMessage(assistantMsgId)
 
-                    // 2. Add the System Info Message (Pill)
-                    const switchMsg: Message = {
-                        id: generateId(),
-                        role: "system",
-                        content: `⚠️ Error with ${apiKey.provider}: ${error.message}\n🔄 Switching to ${nextProvider}...`,
-                        tokens: 0
-                    }
-                    addMessage(switchMsg)
-
-                    // 3. Create a NEW "Thinking" placeholder for the next try
+                    // 2.Create a NEW "Thinking" placeholder for the next try
                     assistantMsgId = generateId()
                     addMessage({
                         id: assistantMsgId,
@@ -219,10 +262,10 @@ export function useChatStream() {
                         tokens: 0
                     })
 
-                    // Only show the "Switching" toast if we didn't just show a "Disabled" toast (to avoid spam)
-                    if (!isFatal) {
-                        toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}...`)
-                    }
+                    // Only show the "Switching" toast
+                    toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}...`, {
+                        position: 'bottom-right'
+                    })
                 }
             }
         }
@@ -236,10 +279,157 @@ export function useChatStream() {
         setLoading(false)
     }
 
+    const handleRegenerate = async () => {
+        const currentMessages = useChatStore.getState().messages
+        if (currentMessages.length === 0) return
+
+        const lastMessage = currentMessages[currentMessages.length - 1]
+
+        // Ensure last message is from assistant
+        if (lastMessage.role !== 'assistant') return
+
+        // 1. Delete the last assistant message
+        deleteMessage(lastMessage.id)
+
+        // 2. Find the last user message to use as prompt
+        // Search backwards in the list *before* modifications
+        const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user')
+
+        if (!lastUserMsg) return
+
+        // 3. Trigger re-submission using logic similar to handleSubmit but without adding a new user message
+        // We set loading to true immediately
+        setLoading(true)
+
+        const keysToTry = getOrderedKeys(lastUserMsg.content)
+
+        if (keysToTry.length === 0) {
+            toast.error("No active API keys found.")
+            setLoading(false)
+            return
+        }
+
+        // Create placeholder for new response
+        let assistantMsgId = generateId()
+        addMessage({
+            id: assistantMsgId,
+            role: "assistant",
+            content: "",
+            tokens: 0
+        })
+
+        let lastError: Error | null = null
+        let success = false
+
+        // We act on the history WITHOUT the just-deleted assistant message
+        const historyForRegen = currentMessages.slice(0, -1)
+
+        for (const apiKey of keysToTry) {
+            try {
+                if (lastError) toast.warning(`Switching to ${apiKey.provider}...`)
+
+                const isFirstTry = keysToTry.indexOf(apiKey) === 0
+                const timeoutDuration = (apiKey.provider === 'perplexity' || apiKey.provider === 'cohere') ? 30000 : (isFirstTry ? 5000 : 20000)
+                const controller = new AbortController()
+                const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
+
+                try {
+                    const response = await fetch("/api/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            messages: historyForRegen.map(m => ({ role: m.role, content: m.content })),
+                            providerId: apiKey.provider,
+                            apiKey: apiKey.key
+                        }),
+                        signal: controller.signal
+                    })
+
+                    if (!response.ok) {
+                        const err = await response.json()
+                        throw new Error(err.error || `Failed`)
+                    }
+                    if (!response.body) throw new Error("No body")
+
+                    const reader = response.body.getReader()
+                    const decoder = new TextDecoder()
+                    let assistantContent = ""
+                    let isFirstChunk = true
+
+                    while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+                        if (isFirstChunk) { clearTimeout(timeoutId); isFirstChunk = false }
+
+                        const chunk = decoder.decode(value)
+                        const lines = chunk.split("\n\n")
+
+                        for (const line of lines) {
+                            if (line.startsWith("data: ")) {
+                                try {
+                                    const data = JSON.parse(line.slice(6))
+                                    if (data.isDone) continue
+                                    if (data.content) {
+                                        assistantContent += data.content
+                                        updateMessage(assistantMsgId, assistantContent)
+                                    }
+                                } catch (e) { }
+                            }
+                        }
+                    }
+
+                    if (!assistantContent) throw new Error("Empty response")
+
+                    const inputTokens = lastUserMsg.tokens || 0
+                    const outputTokens = estimateTokens(assistantContent)
+                    updateApiKey(apiKey.id, { usage: (apiKey.usage || 0) + inputTokens + outputTokens })
+                    updateMessage(assistantMsgId, assistantContent)
+                    success = true
+                    break
+
+                } catch (innerError: any) {
+                    clearTimeout(timeoutId)
+                    if (innerError.name === 'AbortError') throw new Error(`Timeout ${timeoutDuration / 1000}s`)
+                    throw innerError
+                }
+
+            } catch (error: any) {
+                console.error(`Error with ${apiKey.provider}:`, error)
+                lastError = error
+
+                // LOCK LOGIC:
+                const twentyFourHours = 24 * 60 * 60 * 1000
+                updateApiKey(apiKey.id, {
+                    rateLimitedUntil: Date.now() + twentyFourHours,
+                    label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
+                })
+
+                // Only show the "Switching" toast
+                if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
+                    toast.warning(`Error with ${apiKey.provider}. Switching to...`, {
+                        position: 'bottom-right'
+                    })
+                }
+                // Note: handleRegenerate doesn't have the same complex "Thinking" message re-creation logic 
+                // because it just loops. We rely on the final updateMessage/addMessage outside.
+                // Actually, we should probably tell the user we are switching.
+            }
+        }
+
+        if (!success) {
+            const finalErrorMsg = lastError?.message || "Failed to regenerate."
+            toast.error(finalErrorMsg)
+            updateMessage(assistantMsgId, "Error: " + finalErrorMsg)
+        }
+        setLoading(false)
+    }
+
     return {
         input,
         setInput,
         handleSubmit,
+        handleRegenerate,
+        isLoading,
         messages
     }
 }

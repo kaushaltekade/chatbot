@@ -54,6 +54,13 @@ interface ChatStore {
     // Basic UI state
     isSidebarOpen: boolean
     toggleSidebar: () => void
+
+    // Data Management
+    clearAllData: () => void
+
+    // PREFERENCES
+    smartRoutingEnabled: boolean
+    toggleSmartRouting: () => void
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -142,6 +149,17 @@ export const useChatStore = create<ChatStore>()(
 
             isSidebarOpen: true,
             toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+
+            clearAllData: () => set({
+                apiKeys: [],
+                conversations: [],
+                messages: [],
+                activeConversationId: null,
+                isLoading: false
+            }),
+
+            smartRoutingEnabled: false, // Default to false
+            toggleSmartRouting: () => set(state => ({ smartRoutingEnabled: !state.smartRoutingEnabled }))
         }),
         {
             name: 'chatbot-storage', // name of the item in the storage (must be unique)
