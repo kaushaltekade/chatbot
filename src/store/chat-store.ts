@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { generateId } from '@/lib/utils'
 
-export type AIProvider = 'openai' | 'gemini' | 'deepseek' | 'anthropic' | 'groq' | 'mistral' | 'cohere' | 'huggingface' | 'openrouter'
+export type AIProvider = 'openai' | 'gemini' | 'deepseek' | 'anthropic' | 'groq' | 'mistral' | 'cohere' | 'huggingface' | 'openrouter' | 'perplexity' | 'perplexity-chat' | 'together'
 
 export interface ApiKey {
     id: string
@@ -32,6 +32,7 @@ export interface Conversation {
 interface ChatStore {
     apiKeys: ApiKey[]
     setApiKeys: (keys: ApiKey[]) => void
+    reorderApiKeys: (keys: ApiKey[]) => void
     addApiKey: (key: ApiKey) => void
     updateApiKey: (id: string, updates: Partial<ApiKey>) => void
     deleteApiKey: (id: string) => void
@@ -60,6 +61,7 @@ export const useChatStore = create<ChatStore>()(
         (set) => ({
             apiKeys: [],
             setApiKeys: (keys) => set({ apiKeys: keys }),
+            reorderApiKeys: (keys: ApiKey[]) => set({ apiKeys: keys }),
             addApiKey: (key) => set((state) => {
                 const exists = state.apiKeys.some(k => k.id === key.id)
                 if (exists) {

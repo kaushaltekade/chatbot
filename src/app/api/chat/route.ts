@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { OpenAIProvider } from "@/services/llm/openai"
 
 import { GeminiProvider } from "@/services/llm/gemini"
+import { CohereProvider } from "@/services/llm/cohere"
 
 // Map of providers
 const providers = {
@@ -25,6 +26,37 @@ const providers = {
         baseUrl: 'https://api.mistral.ai/v1/chat/completions',
         model: 'mistral-large-latest'
     }),
+    'perplexity': new OpenAIProvider({
+        id: 'perplexity',
+        name: 'Perplexity (Smart Search)',
+        baseUrl: 'https://api.perplexity.ai/chat/completions',
+        model: 'sonar-pro' // Intelligent, research-focused (slower)
+    }),
+    'perplexity-chat': new OpenAIProvider({
+        id: 'perplexity-chat',
+        name: 'Perplexity (Fast)',
+        baseUrl: 'https://api.perplexity.ai/chat/completions',
+        model: 'sonar' // Lightweight, low-latency (faster)
+    }),
+    'together': new OpenAIProvider({
+        id: 'together',
+        name: 'Together AI',
+        baseUrl: 'https://api.together.xyz/v1/chat/completions',
+        model: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'
+    }),
+    'openrouter': new OpenAIProvider({
+        id: 'openrouter',
+        name: 'OpenRouter (Heimdal Free)',
+        baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
+        model: 'heimdal/heimdal-3b:free',
+        headers: {
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "Local Chatbot"
+        }
+    }),
+    // Anthropic requires custom provider (In Progress)
+    'anthropic': new OpenAIProvider({ id: 'anthropic', name: 'Anthropic (Coming Soon)' }),
+    'cohere': new CohereProvider({ model: 'command-r-plus-08-2024' }),
 }
 
 export async function POST(req: NextRequest) {

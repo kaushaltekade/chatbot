@@ -6,12 +6,14 @@ export class OpenAIProvider implements LLMProvider {
     name = "OpenAI"
     private baseUrl: string
     private model: string
+    private extraHeaders: Record<string, string> = {}
 
-    constructor(config?: { baseUrl?: string; model?: string; id?: string; name?: string }) {
+    constructor(config?: { baseUrl?: string; model?: string; id?: string; name?: string; headers?: Record<string, string> }) {
         this.baseUrl = config?.baseUrl || "https://api.openai.com/v1/chat/completions"
         this.model = config?.model || "gpt-3.5-turbo"
         if (config?.id) this.id = config.id
         if (config?.name) this.name = config.name
+        if (config?.headers) this.extraHeaders = config.headers
     }
 
     estimateTokens(text: string): number {
@@ -43,6 +45,7 @@ export class OpenAIProvider implements LLMProvider {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${apiKey}`,
+                    ...this.extraHeaders
                 },
                 body: JSON.stringify({
                     model: this.model,
@@ -66,6 +69,7 @@ export class OpenAIProvider implements LLMProvider {
                     }
                 } catch (e) {
                     const text = await response.text()
+                    console.warn("[OpenAI Provider] Raw Error:", text) // Debug: Show raw error
                     if (text) errorMessage += ` - ${text.slice(0, 200)}`
                 }
 

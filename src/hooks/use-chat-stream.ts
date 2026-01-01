@@ -84,7 +84,10 @@ export function useChatStream() {
                 console.log(`[Chat] Trying provider: ${apiKey.provider} (${apiKey.id})`)
 
                 const isFirstTry = keysToTry.indexOf(apiKey) === 0
-                const timeoutDuration = isFirstTry ? 5000 : 20000
+                // Perplexity and Cohere need more time. Others get 5s speed check.
+                const timeoutDuration = (apiKey.provider === 'perplexity' || apiKey.provider === 'cohere')
+                    ? 30000
+                    : (isFirstTry ? 5000 : 20000)
 
                 const controller = new AbortController()
                 const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
