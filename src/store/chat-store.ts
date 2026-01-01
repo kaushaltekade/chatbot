@@ -104,6 +104,34 @@ async function deleteMessageFromDB(messageId: string) {
     await supabase.from('messages').delete().eq('id', messageId)
 }
 
+async function upsertApiKeyToDB(key: ApiKey) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase
+        .from('api_keys')
+        .upsert({
+            id: key.id,
+            user_id: user.id,
+            provider: key.provider,
+            key_value: key.key,
+            usage: key.usage,
+            limit: key.limit,
+            label: key.label,
+            is_active: key.isActive,
+            // rateLimitedUntil is transient, maybe don't persist or persist as separate field? 
+            // For simplicity, let's ignore it or add it if needed. The schema didn't have it explicitly mapped in my previous SQL but passing extras is fine if column exists.
+            // Actually my proposed SQL didn't have rateLimitedUntil. Let's skip it for now or add it to SQL if vital.
+        })
+    if (error) console.error("Failed to sync api_key:", error)
+}
+
+async function deleteApiKeyFromDB(keyId: string) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('api_keys').delete().eq('id', keyId)
+}
+
 export const useChatStore = create<ChatStore>()(
     persist(
         (set, get) => ({
@@ -113,18 +141,25 @@ export const useChatStore = create<ChatStore>()(
             addApiKey: (key) => set((state) => {
                 const exists = state.apiKeys.some(k => k.id === key.id)
                 if (exists) {
-                    return {
-                        apiKeys: state.apiKeys.map(k => k.id === key.id ? key : k)
-                    }
+                    const updatedKeys = state.apiKeys.map(k => k.id === key.id ? key : k)
+                    upsertApiKeyToDB(key)
+                    return { apiKeys: updatedKeys }
                 }
+                upsertApiKeyToDB(key)
                 return { apiKeys: [...state.apiKeys, key] }
             }),
             updateApiKey: (id, updates) =>
-                set((state) => ({
-                    apiKeys: state.apiKeys.map((k) => (k.id === id ? { ...k, ...updates } : k)),
-                })),
+                set((state) => {
+                    const updatedKeys = state.apiKeys.map((k) => (k.id === id ? { ...k, ...updates } : k))
+                    const updatedKey = updatedKeys.find(k => k.id === id)
+                    if (updatedKey) upsertApiKeyToDB(updatedKey)
+                    return { apiKeys: updatedKeys }
+                }),
             deleteApiKey: (id) =>
-                set((state) => ({ apiKeys: state.apiKeys.filter((k) => k.id !== id) })),
+                set((state) => {
+                    deleteApiKeyFromDB(id)
+                    return { apiKeys: state.apiKeys.filter((k) => k.id !== id) }
+                }),
 
             // Chat Implementation
             conversations: [],
@@ -221,6 +256,24 @@ export const useChatStore = create<ChatStore>()(
                 const { data: { user } } = await supabase.auth.getUser()
                 if (!user) return
 
+                // Fetch API Keys
+                const { data: keys, error: keyError } = await supabase
+                    .from('api_keys')
+                    .select('*')
+                    .eq('user_id', user.id)
+
+                if (keyError) console.error("Error fetching keys:", keyError)
+
+                const remoteKeys: ApiKey[] = keys?.map((k: any) => ({
+                    id: k.id,
+                    provider: k.provider as AIProvider,
+                    key: k.key_value,
+                    usage: k.usage,
+                    limit: k.limit,
+                    isActive: k.is_active,
+                    label: k.label
+                })) || []
+
                 // Fetch Conversations
                 const { data: convs, error: convError } = await supabase
                     .from('conversations')
@@ -257,12 +310,13 @@ export const useChatStore = create<ChatStore>()(
                     })
                 }
 
-                if (loadedConversations.length > 0) {
-                    set({
-                        conversations: loadedConversations,
-                        activeConversationId: loadedConversations[0].id,
-                        messages: loadedConversations[0].messages
-                    })
+                if (loadedConversations.length > 0 || remoteKeys.length > 0) {
+                    set(state => ({
+                        conversations: loadedConversations.length > 0 ? loadedConversations : state.conversations,
+                        activeConversationId: loadedConversations.length > 0 ? loadedConversations[0].id : state.activeConversationId,
+                        messages: loadedConversations.length > 0 ? loadedConversations[0].messages : state.messages,
+                        apiKeys: remoteKeys.length > 0 ? remoteKeys : state.apiKeys
+                    }))
                     toast.success("Sync completed")
                 }
             },
