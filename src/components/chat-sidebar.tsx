@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { MessageSquarePlus, Settings, History } from "lucide-react"
 import Link from "next/link"
+import { AuthButtons } from "@/components/auth/auth-buttons"
 
 export function ChatSidebar() {
     const { isSidebarOpen } = useChatStore()
@@ -37,7 +38,8 @@ export function ChatSidebar() {
                 </div>
             </ScrollArea>
 
-            <div className="p-4 border-t">
+            <div className="p-4 border-t space-y-2">
+                <AuthButtons />
                 <Link href="/settings">
                     <Button variant="ghost" className="w-full justify-start gap-2">
                         <Settings className="w-4 h-4" />

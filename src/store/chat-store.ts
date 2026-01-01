@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { generateId } from '@/lib/utils'
+import { supabase } from '@/lib/supabase/client'
+import { toast } from 'sonner'
 
 export type AIProvider = 'openai' | 'gemini' | 'deepseek' | 'anthropic' | 'groq' | 'mistral' | 'cohere' | 'huggingface' | 'openrouter' | 'perplexity' | 'perplexity-chat' | 'together'
 
@@ -8,9 +10,9 @@ export interface ApiKey {
     id: string
     provider: AIProvider
     key: string
-    usage: number // Tokens used or remaining (depends on provider logic)
+    usage: number
     limit?: number
-    rateLimitedUntil?: number // Timestamp when the key can be used again
+    rateLimitedUntil?: number
     isActive: boolean
     label?: string
 }
@@ -19,7 +21,7 @@ export interface Message {
     id: string
     role: 'user' | 'assistant' | 'system'
     content: string
-    tokens?: number // For token tracking
+    tokens?: number
 }
 
 export interface Conversation {
@@ -40,7 +42,7 @@ interface ChatStore {
     // Chat State
     conversations: Conversation[]
     activeConversationId: string | null
-    messages: Message[] // Current active messages
+    messages: Message[]
     isLoading: boolean
 
     // Actions
@@ -57,15 +59,54 @@ interface ChatStore {
 
     // Data Management
     clearAllData: () => void
+    syncWithSupabase: () => Promise<void> // Force sync
 
     // PREFERENCES
     smartRoutingEnabled: boolean
     toggleSmartRouting: () => void
 }
 
+// Helpers for Supabase DB
+async function upsertConversationToDB(conversation: Conversation) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase
+        .from('conversations')
+        .upsert({
+            id: conversation.id,
+            user_id: user.id,
+            title: conversation.title,
+            last_updated: new Date(conversation.lastUpdated).toISOString()
+        })
+    if (error) console.error("Failed to sync conversation:", error)
+}
+
+async function upsertMessageToDB(message: Message, conversationId: string) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase
+        .from('messages')
+        .upsert({
+            id: message.id,
+            conversation_id: conversationId,
+            role: message.role,
+            content: message.content,
+            tokens: message.tokens
+        })
+    if (error) console.error("Failed to sync message:", error)
+}
+
+async function deleteMessageFromDB(messageId: string) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('messages').delete().eq('id', messageId)
+}
+
 export const useChatStore = create<ChatStore>()(
     persist(
-        (set) => ({
+        (set, get) => ({
             apiKeys: [],
             setApiKeys: (keys) => set({ apiKeys: keys }),
             reorderApiKeys: (keys: ApiKey[]) => set({ apiKeys: keys }),
@@ -103,6 +144,7 @@ export const useChatStore = create<ChatStore>()(
                     activeConversationId: newConv.id,
                     messages: []
                 }))
+                upsertConversationToDB(newConv)
             },
             selectConversation: (id) => {
                 set(state => ({
@@ -118,6 +160,14 @@ export const useChatStore = create<ChatStore>()(
                             ? { ...c, messages: newMessages, lastUpdated: Date.now() }
                             : c
                     )
+
+                    // Sync to DB
+                    if (state.activeConversationId) {
+                        upsertMessageToDB(message, state.activeConversationId)
+                        const conv = updatedConversations.find(c => c.id === state.activeConversationId)
+                        if (conv) upsertConversationToDB(conv)
+                    }
+
                     return { messages: newMessages, conversations: updatedConversations }
                 })
             },
@@ -131,6 +181,12 @@ export const useChatStore = create<ChatStore>()(
                             ? { ...c, messages: newMessages }
                             : c
                     )
+
+                    const msg = newMessages.find(m => m.id === id)
+                    if (msg && state.activeConversationId) {
+                        upsertMessageToDB(msg, state.activeConversationId)
+                    }
+
                     return { messages: newMessages, conversations: updatedConversations }
                 })
             },
@@ -142,6 +198,9 @@ export const useChatStore = create<ChatStore>()(
                             ? { ...c, messages: newMessages }
                             : c
                     )
+
+                    deleteMessageFromDB(id)
+
                     return { messages: newMessages, conversations: updatedConversations }
                 })
             },
@@ -158,15 +217,72 @@ export const useChatStore = create<ChatStore>()(
                 isLoading: false
             }),
 
-            smartRoutingEnabled: false, // Default to false
+            syncWithSupabase: async () => {
+                const { data: { user } } = await supabase.auth.getUser()
+                if (!user) return
+
+                // Fetch Conversations
+                const { data: convs, error: convError } = await supabase
+                    .from('conversations')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('last_updated', { ascending: false })
+
+                if (convError) {
+                    console.error("Error fetching conversations:", convError)
+                    return
+                }
+
+                // For each conversation, fetch messages (this is a bit heavy, optimization would be to load only active or lazy load)
+                // For now, let's load all to be synced with local Store style
+                const loadedConversations: Conversation[] = []
+
+                for (const c of convs) {
+                    const { data: msgs } = await supabase
+                        .from('messages')
+                        .select('*')
+                        .eq('conversation_id', c.id)
+                        .order('created_at', { ascending: true })
+
+                    loadedConversations.push({
+                        id: c.id,
+                        title: c.title || "New Chat",
+                        lastUpdated: new Date(c.last_updated).getTime(),
+                        messages: msgs?.map((m: any) => ({
+                            id: m.id,
+                            role: m.role,
+                            content: m.content,
+                            tokens: m.tokens
+                        })) || []
+                    })
+                }
+
+                if (loadedConversations.length > 0) {
+                    set({
+                        conversations: loadedConversations,
+                        activeConversationId: loadedConversations[0].id,
+                        messages: loadedConversations[0].messages
+                    })
+                    toast.success("Sync completed")
+                }
+            },
+
+            smartRoutingEnabled: false,
             toggleSmartRouting: () => set(state => ({ smartRoutingEnabled: !state.smartRoutingEnabled }))
         }),
         {
-            name: 'chatbot-storage', // name of the item in the storage (must be unique)
+            name: 'chatbot-storage',
             partialize: (state) => ({
                 apiKeys: state.apiKeys,
-                conversations: state.conversations // Persist history
+                conversations: state.conversations,
+                smartRoutingEnabled: state.smartRoutingEnabled
             }),
+            onRehydrateStorage: () => (state) => {
+                // Check auth on load and sync
+                setTimeout(() => {
+                    state?.syncWithSupabase()
+                }, 1000)
+            }
         }
     )
 )
