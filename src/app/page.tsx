@@ -13,7 +13,7 @@ import { Menu, Send, Bot, User, RotateCcw } from "lucide-react"
 
 export default function Home() {
   const { isSidebarOpen, toggleSidebar } = useChatStore()
-  const { messages, input, setInput, handleSubmit, handleRegenerate, isLoading } = useChatStream()
+  const { messages, input, setInput, handleSubmit, handleRegenerate, handleEdit, isLoading } = useChatStream()
   const mounted = useMounted()
 
   // Prevent hydration mismatch by defaulting to open (server state) until mounted
@@ -54,7 +54,13 @@ export default function Home() {
               )}
 
               {messages.map((m) => (
-                <MessageBubble key={m.id} role={m.role} content={m.content} />
+                <MessageBubble
+                  key={m.id}
+                  id={m.id}
+                  role={m.role}
+                  content={m.content}
+                  onEdit={handleEdit}
+                />
               ))}
             </div>
           </ScrollArea>

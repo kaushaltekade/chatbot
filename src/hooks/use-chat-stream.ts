@@ -424,11 +424,162 @@ export function useChatStream() {
         setLoading(false)
     }
 
+    const handleEdit = async (messageId: string, newContent: string) => {
+        const currentMessages = useChatStore.getState().messages
+        const msgIndex = currentMessages.findIndex(m => m.id === messageId)
+
+        if (msgIndex === -1) return
+
+        // 1. Truncate history: Keep messages up to the edited one
+        // We want to keep 0..msgIndex.
+        // Actually, we want to update the message at msgIndex, and delete everything AFTER it.
+        const newHistory = currentMessages.slice(0, msgIndex + 1)
+
+        // 2. Update the specific message content
+        newHistory[msgIndex] = { ...newHistory[msgIndex], content: newContent }
+
+        // 3. Update Store with truncated history
+        // We validly "fork" here.
+        // We need to manually update the store state.
+        useChatStore.setState(state => {
+            const updatedConversations = state.conversations.map(c =>
+                c.id === state.activeConversationId
+                    ? { ...c, messages: newHistory, lastUpdated: Date.now() }
+                    : c
+            )
+            return { messages: newHistory, conversations: updatedConversations }
+        })
+
+        // 4. Trigger submission logic
+        // We behave as if the user just sent this message, but we need to NOT add it again.
+        // We need to re-use the "generate response" logic.
+
+        setLoading(true)
+        const keysToTry = getOrderedKeys(newContent)
+
+        if (keysToTry.length === 0) {
+            toast.error("No active API keys found.")
+            setLoading(false)
+            return
+        }
+
+        // Placeholder for new Assistant response
+        let assistantMsgId = generateId()
+        addMessage({
+            id: assistantMsgId,
+            role: "assistant",
+            content: "",
+            tokens: 0
+        })
+
+        let lastError: Error | null = null
+        let success = false
+
+        // History for API is the new truncated history (which ends with the edited User message)
+        const historyForApi = newHistory
+
+        for (const apiKey of keysToTry) {
+            try {
+                if (lastError) toast.warning(`Switching to ${apiKey.provider}...`)
+
+                const isFirstTry = keysToTry.indexOf(apiKey) === 0
+                const timeoutDuration = (apiKey.provider === 'perplexity' || apiKey.provider === 'cohere') ? 30000 : (isFirstTry ? 5000 : 20000)
+                const controller = new AbortController()
+                const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
+
+                try {
+                    const response = await fetch("/api/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            messages: historyForApi.map(m => ({ role: m.role, content: m.content })),
+                            providerId: apiKey.provider,
+                            apiKey: apiKey.key
+                        }),
+                        signal: controller.signal
+                    })
+
+                    if (!response.ok) {
+                        const err = await response.json()
+                        throw new Error(err.error || `Failed`)
+                    }
+                    if (!response.body) throw new Error("No body")
+
+                    const reader = response.body.getReader()
+                    const decoder = new TextDecoder()
+                    let assistantContent = ""
+                    let isFirstChunk = true
+
+                    while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+                        if (isFirstChunk) { clearTimeout(timeoutId); isFirstChunk = false }
+
+                        const chunk = decoder.decode(value)
+                        const lines = chunk.split("\n\n")
+
+                        for (const line of lines) {
+                            if (line.startsWith("data: ")) {
+                                try {
+                                    const data = JSON.parse(line.slice(6))
+                                    if (data.isDone) continue
+                                    if (data.content) {
+                                        assistantContent += data.content
+                                        updateMessage(assistantMsgId, assistantContent)
+                                    }
+                                } catch (e) { }
+                            }
+                        }
+                    }
+
+                    if (!assistantContent) throw new Error("Empty response")
+
+                    const inputTokens = estimateTokens(newContent)
+                    const outputTokens = estimateTokens(assistantContent)
+                    updateApiKey(apiKey.id, { usage: (apiKey.usage || 0) + inputTokens + outputTokens })
+                    updateMessage(assistantMsgId, assistantContent)
+                    success = true
+                    break
+
+                } catch (innerError: any) {
+                    clearTimeout(timeoutId)
+                    if (innerError.name === 'AbortError') throw new Error(`Timeout ${timeoutDuration / 1000}s`)
+                    throw innerError
+                }
+
+            } catch (error: any) {
+                console.error(`Error with ${apiKey.provider}:`, error)
+                lastError = error
+
+                // LOCK LOGIC:
+                const twentyFourHours = 24 * 60 * 60 * 1000
+                updateApiKey(apiKey.id, {
+                    rateLimitedUntil: Date.now() + twentyFourHours,
+                    label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
+                })
+
+                if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
+                    toast.warning(`Error with ${apiKey.provider}. Switching to...`, {
+                        position: 'bottom-right'
+                    })
+                }
+            }
+        }
+
+        if (!success) {
+            const finalErrorMsg = lastError?.message || "Failed to regenerate."
+            toast.error(finalErrorMsg)
+            updateMessage(assistantMsgId, "Error: " + finalErrorMsg)
+        }
+        setLoading(false)
+    }
+
     return {
         input,
         setInput,
         handleSubmit,
         handleRegenerate,
+        handleEdit,
         isLoading,
         messages
     }
