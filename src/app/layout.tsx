@@ -8,8 +8,8 @@ import { Toaster } from "@/components/ui/sonner"
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Multi-API AI Chatbot",
-  description: "Chat with multiple AI providers using your own API keys.",
+  title: "AAIOP",
+  description: "ALL AI IN ONE PLACE - Chat with multiple AI providers",
 };
 
 export default function RootLayout({

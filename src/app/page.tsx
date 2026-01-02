@@ -21,7 +21,14 @@ export default function Home() {
   const sidebarVisible = mounted ? isSidebarOpen : true
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background font-sans">
+    <div className="flex h-screen bg-background text-foreground overflow-hidden selection:bg-primary/20 font-sans">
+      {/* Background Gradient Mesh */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] opacity-50" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-blue-600/20 rounded-full blur-[100px] opacity-30" />
+      </div>
+      <div className="bg-noise" />
+
       {/* Sidebar */}
       <div className={cn(
         "transition-all duration-300 ease-in-out shrink-0 border-r",
@@ -37,7 +44,7 @@ export default function Home() {
             <Menu className="w-5 h-5" />
           </Button>
           <div className="flex-1 text-center">
-            <span className="font-semibold text-lg opacity-90">GPT-4o</span>
+            <span className="font-semibold text-lg opacity-90">AAIOP</span>
           </div>
           <div className="w-9" /> {/* Spacer for centering */}
         </header>
@@ -60,6 +67,7 @@ export default function Home() {
                   id={m.id}
                   role={m.role}
                   content={m.content}
+                  provider={m.provider}
                   onEdit={handleEdit}
                 />
               ))}
@@ -74,7 +82,7 @@ export default function Home() {
                   suppressHydrationWarning
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Message ChatGPT..."
+                  placeholder="Message AAIOP..."
                   className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-5 py-3.5 h-auto min-h-[52px] max-h-48 resize-none mb-6"
                   autoFocus
                 />
@@ -114,7 +122,7 @@ export default function Home() {
               )}
 
               <div className="text-xs text-center text-muted-foreground mt-2">
-                Multi-AI Chat can make mistakes. Check important info.
+                AAIOP can make mistakes. Check important info.
               </div>
             </div>
           </div>

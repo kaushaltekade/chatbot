@@ -170,7 +170,7 @@ export function ApiKeyManager() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement("a")
         a.href = url
-        a.download = `chatbot-backup-${new Date().toISOString().slice(0, 10)}.json`
+        a.download = `aaiop-backup-${new Date().toISOString().slice(0, 10)}.json`
         a.click()
     }
 
@@ -186,7 +186,7 @@ export function ApiKeyManager() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement("a")
         a.href = url
-        a.download = `chatbot-history-${new Date().toISOString().slice(0, 10)}.md`
+        a.download = `aaiop-history-${new Date().toISOString().slice(0, 10)}.md`
         a.click()
     }
 

@@ -4,6 +4,8 @@ import { formatTokenCount, estimateTokens } from "@/lib/token-utils"
 import { generateId } from "@/lib/utils"
 import { toast } from "sonner"
 
+
+
 export function useChatStream() {
     const {
         messages,
@@ -13,7 +15,9 @@ export function useChatStream() {
         setLoading,
         isLoading,
         apiKeys,
-        updateApiKey
+        updateApiKey,
+        createConversation,
+        updateConversationTitle
     } = useChatStore()
 
     const [input, setInput] = useState("")
@@ -92,6 +96,29 @@ export function useChatStream() {
         })
     }
 
+    const checkAndResetUsage = (apiKey: typeof apiKeys[0]) => {
+        const now = Date.now()
+        // Reset if last reset provided and > 24 hours ago, OR if never reset
+        // Actually, if never reset, we might want to start tracking now, but not wipe existing? 
+        // User asked for "show how much token is there but show this information in day like 24 hour after reset".
+        // Let's assume on first run with this code, if lastUsageReset is undefined, we simply set it to now and keep usage (or reset? safe to keep).
+        // If we want a strict "daily usage", we should probably reset if it's undefined to start clean or just set the timestamp.
+        // Let's set timestamp if missing, but reset if > 24h.
+
+        if (!apiKey.lastUsageReset) {
+            updateApiKey(apiKey.id, { lastUsageReset: now })
+            return apiKey.usage || 0 // Don't wipe legacy usage immediately, just start timer
+        }
+
+        const oneDay = 24 * 60 * 60 * 1000
+        if (now - apiKey.lastUsageReset > oneDay) {
+            // It's been more than 24h, reset usage
+            updateApiKey(apiKey.id, { lastUsageReset: now, usage: 0 })
+            return 0
+        }
+        return apiKey.usage || 0
+    }
+
     const handleSubmit = async (e?: React.FormEvent) => {
         e?.preventDefault()
         if (!input.trim()) return
@@ -102,6 +129,25 @@ export function useChatStream() {
             const msg = "No active API keys found. Please add a key in Settings."
             toast.error(msg)
             return
+        }
+
+        // 1. Ensure Conversation Exists
+        let currentActiveId = useChatStore.getState().activeConversationId
+        let isNewConversation = false
+        if (!currentActiveId) {
+            createConversation()
+            currentActiveId = useChatStore.getState().activeConversationId
+            isNewConversation = true
+        }
+
+        // 2. Auto-Title if it's the first message (or new conversation)
+        // We check if messages are empty OR if we just created it.
+        const currentMessages = useChatStore.getState().messages
+        if (isNewConversation || currentMessages.length === 0) {
+            const title = input.slice(0, 30) + (input.length > 30 ? "..." : "")
+            if (currentActiveId) {
+                updateConversationTitle(currentActiveId, title)
+            }
         }
 
         const userMsg: Message = {
@@ -129,6 +175,9 @@ export function useChatStream() {
 
         for (const apiKey of keysToTry) {
             try {
+                // Usage Reset Check
+                const currentUsage = checkAndResetUsage(apiKey)
+
                 if (lastError) {
                     toast.warning(`Switching to ${apiKey.provider}...`)
                 }
@@ -149,7 +198,14 @@ export function useChatStream() {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            messages: [...messages, userMsg].map(m => ({ role: m.role, content: m.content })),
+                            messages: [...useChatStore.getState().messages.slice(0, -1), userMsg].map(m => ({ role: m.role, content: m.content })), // Use fresh state, excluding the empty assistant placeholder we just added? No, addMessage updates store.
+                            // Actually, store.messages includes the empty assistant message now. We should exclude it for the API call.
+                            // The userMsg IS in the store. 
+                            // The assistantMsg IS in the store (empty). 
+                            // So we want all messages EXCEPT the last one (assistant placeholder).
+                            // Correct logic:
+                            // messages already has userMsg (added above) and assistantMsg (added above).
+                            // We need to send everything UP TO userMsg.
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
                         }),
@@ -172,8 +228,6 @@ export function useChatStream() {
                         const { done, value } = await reader.read()
                         if (done) break
 
-                        // Clear timeout only after we receive the first byte of body data
-                        // This prevents hanging on "headers received" but "no data" states
                         if (isFirstChunk) {
                             clearTimeout(timeoutId)
                             isFirstChunk = false
@@ -190,7 +244,7 @@ export function useChatStream() {
 
                                     if (data.content) {
                                         assistantContent += data.content
-                                        updateMessage(assistantMsgId, assistantContent)
+                                        updateMessage(assistantMsgId, assistantContent, apiKey.provider)
                                     }
                                 } catch (e) {
                                     // ignore parse errors for partial chunks
@@ -207,7 +261,16 @@ export function useChatStream() {
                     const inputTokens = userMsg.tokens || 0
                     const outputTokens = estimateTokens(assistantContent)
                     const totalCost = inputTokens + outputTokens
-                    const newUsage = (apiKey.usage || 0) + totalCost
+
+                    // Re-read usage in case it changed (unlikely in single thread but good practice)
+                    // We use the apiKey object but we should fetch fresh or just add to what we know + what we reset
+                    // Better: read from store or just add to the locally 'reset' value?
+                    // Safe to just add to store state using functional update if possible, OR just read from apiKey object we have (it's ref might be stale).
+                    // Best: `updateApiKey` merges updates. We need to know the base.
+                    // The `checkAndResetUsage` might have updated the store.
+                    // Let's re-fetch key from store to be safe?
+                    const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
+                    const newUsage = (freshKey.usage || 0) + totalCost
 
                     updateApiKey(apiKey.id, {
                         usage: newUsage
@@ -217,13 +280,13 @@ export function useChatStream() {
                     if (apiKey.limit && apiKey.limit > 0) {
                         const percentage = newUsage / apiKey.limit
                         if (percentage >= 0.9) {
-                            toast.error(`CRITICAL: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}`)
+                            toast.error(`CRITICAL: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider} (24h)`)
                         } else if (percentage >= 0.8) {
-                            toast.warning(`Alert: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}`)
+                            toast.warning(`Alert: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider} (24h)`)
                         }
                     }
 
-                    updateMessage(assistantMsgId, assistantContent)
+                    updateMessage(assistantMsgId, assistantContent, apiKey.provider)
                     success = true
                     break // Stop loop on success
 
@@ -239,18 +302,16 @@ export function useChatStream() {
                 console.error(`Error with ${apiKey.provider}:`, error)
                 lastError = error
 
-                // LOCK LOGIC:
                 const twentyFourHours = 24 * 60 * 60 * 1000
                 updateApiKey(apiKey.id, {
                     rateLimitedUntil: Date.now() + twentyFourHours,
                     label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
                 })
 
-                // Show switch message in chat
                 if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
                     const nextProvider = keysToTry[keysToTry.indexOf(apiKey) + 1].provider
 
-                    // REORDERING LOGIC:
+                    // Cleanup failed message
                     deleteMessage(assistantMsgId)
                     assistantMsgId = generateId()
                     addMessage({
@@ -260,7 +321,6 @@ export function useChatStream() {
                         tokens: 0
                     })
 
-                    // Explicitly notify user about context preservation
                     toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}... (Context Preserved)`, {
                         description: "Your full conversation history is being sent to the next provider.",
                         position: 'bottom-right',
@@ -292,13 +352,10 @@ export function useChatStream() {
         deleteMessage(lastMessage.id)
 
         // 2. Find the last user message to use as prompt
-        // Search backwards in the list *before* modifications
         const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user')
 
         if (!lastUserMsg) return
 
-        // 3. Trigger re-submission using logic similar to handleSubmit but without adding a new user message
-        // We set loading to true immediately
         setLoading(true)
 
         const keysToTry = getOrderedKeys(lastUserMsg.content)
@@ -309,7 +366,7 @@ export function useChatStream() {
             return
         }
 
-        // Create placeholder for new response
+        // Placeholder for new response
         let assistantMsgId = generateId()
         addMessage({
             id: assistantMsgId,
@@ -326,6 +383,7 @@ export function useChatStream() {
 
         for (const apiKey of keysToTry) {
             try {
+                checkAndResetUsage(apiKey)
                 if (lastError) toast.warning(`Switching to ${apiKey.provider}...`)
 
                 const isFirstTry = keysToTry.indexOf(apiKey) === 0
@@ -382,8 +440,11 @@ export function useChatStream() {
 
                     const inputTokens = lastUserMsg.tokens || 0
                     const outputTokens = estimateTokens(assistantContent)
-                    updateApiKey(apiKey.id, { usage: (apiKey.usage || 0) + inputTokens + outputTokens })
-                    updateMessage(assistantMsgId, assistantContent)
+
+                    const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
+                    updateApiKey(apiKey.id, { usage: (freshKey.usage || 0) + inputTokens + outputTokens })
+
+                    updateMessage(assistantMsgId, assistantContent, apiKey.provider)
                     success = true
                     break
 
@@ -396,23 +457,14 @@ export function useChatStream() {
             } catch (error: any) {
                 console.error(`Error with ${apiKey.provider}:`, error)
                 lastError = error
-
-                // LOCK LOGIC:
                 const twentyFourHours = 24 * 60 * 60 * 1000
                 updateApiKey(apiKey.id, {
                     rateLimitedUntil: Date.now() + twentyFourHours,
                     label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
                 })
-
-                // Only show the "Switching" toast
                 if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
-                    toast.warning(`Error with ${apiKey.provider}. Switching to...`, {
-                        position: 'bottom-right'
-                    })
+                    toast.warning(`Error with ${apiKey.provider}. Switching to...`, { position: 'bottom-right' })
                 }
-                // Note: handleRegenerate doesn't have the same complex "Thinking" message re-creation logic 
-                // because it just loops. We rely on the final updateMessage/addMessage outside.
-                // Actually, we should probably tell the user we are switching.
             }
         }
 
@@ -430,17 +482,12 @@ export function useChatStream() {
 
         if (msgIndex === -1) return
 
-        // 1. Truncate history: Keep messages up to the edited one
-        // We want to keep 0..msgIndex.
-        // Actually, we want to update the message at msgIndex, and delete everything AFTER it.
+        // 1. Truncate history
         const newHistory = currentMessages.slice(0, msgIndex + 1)
-
-        // 2. Update the specific message content
+        // 2. Update content
         newHistory[msgIndex] = { ...newHistory[msgIndex], content: newContent }
 
-        // 3. Update Store with truncated history
-        // We validly "fork" here.
-        // We need to manually update the store state.
+        // 3. Update Store
         useChatStore.setState(state => {
             const updatedConversations = state.conversations.map(c =>
                 c.id === state.activeConversationId
@@ -450,10 +497,7 @@ export function useChatStream() {
             return { messages: newHistory, conversations: updatedConversations }
         })
 
-        // 4. Trigger submission logic
-        // We behave as if the user just sent this message, but we need to NOT add it again.
-        // We need to re-use the "generate response" logic.
-
+        // 4. Trigger submission
         setLoading(true)
         const keysToTry = getOrderedKeys(newContent)
 
@@ -463,7 +507,6 @@ export function useChatStream() {
             return
         }
 
-        // Placeholder for new Assistant response
         let assistantMsgId = generateId()
         addMessage({
             id: assistantMsgId,
@@ -474,12 +517,11 @@ export function useChatStream() {
 
         let lastError: Error | null = null
         let success = false
-
-        // History for API is the new truncated history (which ends with the edited User message)
         const historyForApi = newHistory
 
         for (const apiKey of keysToTry) {
             try {
+                checkAndResetUsage(apiKey)
                 if (lastError) toast.warning(`Switching to ${apiKey.provider}...`)
 
                 const isFirstTry = keysToTry.indexOf(apiKey) === 0
@@ -536,8 +578,11 @@ export function useChatStream() {
 
                     const inputTokens = estimateTokens(newContent)
                     const outputTokens = estimateTokens(assistantContent)
-                    updateApiKey(apiKey.id, { usage: (apiKey.usage || 0) + inputTokens + outputTokens })
-                    updateMessage(assistantMsgId, assistantContent)
+
+                    const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
+                    updateApiKey(apiKey.id, { usage: (freshKey.usage || 0) + inputTokens + outputTokens })
+
+                    updateMessage(assistantMsgId, assistantContent, apiKey.provider)
                     success = true
                     break
 
@@ -550,18 +595,13 @@ export function useChatStream() {
             } catch (error: any) {
                 console.error(`Error with ${apiKey.provider}:`, error)
                 lastError = error
-
-                // LOCK LOGIC:
                 const twentyFourHours = 24 * 60 * 60 * 1000
                 updateApiKey(apiKey.id, {
                     rateLimitedUntil: Date.now() + twentyFourHours,
                     label: `${apiKey.label || apiKey.provider} (Locked 24h - Error)`
                 })
-
                 if (keysToTry.indexOf(apiKey) < keysToTry.length - 1) {
-                    toast.warning(`Error with ${apiKey.provider}. Switching to...`, {
-                        position: 'bottom-right'
-                    })
+                    toast.warning(`Error with ${apiKey.provider}. Switching to...`, { position: 'bottom-right' })
                 }
             }
         }

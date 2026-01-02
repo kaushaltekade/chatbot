@@ -1,6 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
+import { useChatStore } from "@/store/chat-store"
 import { supabase } from "@/lib/supabase/client"
 import { Github, LogIn, LogOut } from "lucide-react"
 import { useState, useEffect } from "react"
@@ -35,8 +36,11 @@ export function AuthButtons() {
         // Listen for changes
         const {
             data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
+        } = supabase.auth.onAuthStateChange((event, session) => {
             setUser(session?.user ?? null)
+            if (event === 'SIGNED_IN') {
+                useChatStore.getState().syncWithSupabase()
+            }
         })
 
         return () => subscription.unsubscribe()

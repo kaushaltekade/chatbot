@@ -12,6 +12,7 @@ export interface ApiKey {
     key: string
     usage: number
     limit?: number
+    lastUsageReset?: number // Timestamp of last usage reset
     rateLimitedUntil?: number
     isActive: boolean
     label?: string
@@ -22,6 +23,7 @@ export interface Message {
     role: 'user' | 'assistant' | 'system'
     content: string
     tokens?: number
+    provider?: string
 }
 
 export interface Conversation {
@@ -47,9 +49,11 @@ interface ChatStore {
 
     // Actions
     createConversation: () => void
+    deleteConversation: (id: string) => void
+    updateConversationTitle: (id: string, title: string) => void
     selectConversation: (id: string) => void
     addMessage: (message: Message) => void
-    updateMessage: (id: string, content: string) => void
+    updateMessage: (id: string, content: string, provider?: string) => void
     deleteMessage: (id: string) => void
     setLoading: (loading: boolean) => void
 
@@ -80,6 +84,12 @@ async function upsertConversationToDB(conversation: Conversation) {
             last_updated: new Date(conversation.lastUpdated).toISOString()
         })
     if (error) console.error("Failed to sync conversation:", error)
+}
+
+async function deleteConversationFromDB(id: string) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('conversations').delete().eq('id', id)
 }
 
 async function upsertMessageToDB(message: Message, conversationId: string) {
@@ -181,6 +191,34 @@ export const useChatStore = create<ChatStore>()(
                 }))
                 upsertConversationToDB(newConv)
             },
+            deleteConversation: (id) => {
+                set(state => {
+                    const newConversations = state.conversations.filter(c => c.id !== id)
+                    // If active was deleted, select next best or create new
+                    let newActiveId = state.activeConversationId
+                    if (state.activeConversationId === id) {
+                        newActiveId = newConversations.length > 0 ? newConversations[0].id : null
+                    }
+
+                    deleteConversationFromDB(id)
+
+                    return {
+                        conversations: newConversations,
+                        activeConversationId: newActiveId,
+                        messages: newActiveId ? (newConversations.find(c => c.id === newActiveId)?.messages || []) : []
+                    }
+                })
+            },
+            updateConversationTitle: (id, title) => {
+                set(state => {
+                    const updatedConversations = state.conversations.map(c =>
+                        c.id === id ? { ...c, title } : c
+                    )
+                    const conv = updatedConversations.find(c => c.id === id)
+                    if (conv) upsertConversationToDB(conv)
+                    return { conversations: updatedConversations }
+                })
+            },
             selectConversation: (id) => {
                 set(state => ({
                     activeConversationId: id,
@@ -206,10 +244,10 @@ export const useChatStore = create<ChatStore>()(
                     return { messages: newMessages, conversations: updatedConversations }
                 })
             },
-            updateMessage: (id, content) => {
+            updateMessage: (id, content, provider) => {
                 set(state => {
                     const newMessages = state.messages.map(m =>
-                        m.id === id ? { ...m, content } : m
+                        m.id === id ? { ...m, content, ...(provider ? { provider } : {}) } : m
                     )
                     const updatedConversations = state.conversations.map(c =>
                         c.id === state.activeConversationId

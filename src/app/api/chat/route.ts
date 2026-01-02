@@ -52,7 +52,7 @@ const providers = {
         model: 'heimdal/heimdal-3b:free',
         headers: {
             "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "Local Chatbot"
+            "X-Title": "AAIOP"
         }
     }),
     'anthropic': new AnthropicProvider(),
