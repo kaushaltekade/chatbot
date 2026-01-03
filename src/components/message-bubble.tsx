@@ -1,14 +1,17 @@
 import { cn } from "@/lib/utils"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Copy, Check, Pencil, RotateCcw, X, Bot, User, Sparkles, Brain, Zap, Wind, Search, Link as LinkIcon, Globe, Cpu } from "lucide-react"
+import { Copy, Check, Pencil, RotateCcw, X, Bot, User, Sparkles, Brain, Zap, Wind, Search, Link as LinkIcon, Globe, Cpu, Download } from "lucide-react"
 import { useState } from "react"
 import { Button } from "./ui/button"
 import { Textarea } from "./ui/textarea"
 import { useChatStream } from "@/hooks/use-chat-stream"
+import { useChatStore } from "@/store/chat-store"
 import { motion } from "framer-motion"
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { determineFilename } from "@/lib/file-utils"
+import { toast } from "sonner"
 
 interface MessageBubbleProps {
     id: string
@@ -32,6 +35,92 @@ function ModelIcon({ provider, className }: { provider?: string, className?: str
     if (p.includes('openrouter')) return <Globe className={className} />
 
     return <Bot className={className} />
+}
+
+interface CodeBlockProps {
+    language: string
+    value: string
+    isUser: boolean
+}
+
+function CodeBlock({ language, value, isUser }: CodeBlockProps) {
+    const { openArtifact } = useChatStore()
+    const [copied, setCopied] = useState(false)
+
+    const onCopy = () => {
+        if (!value) return
+        navigator.clipboard.writeText(value)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
+
+    const onDownload = () => {
+        if (!value) return
+        const filename = determineFilename(value, language)
+        const blob = new Blob([value], { type: "text/plain" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        toast.success(`Downloaded ${filename}`)
+    }
+
+    return (
+        <div className="rounded-xl overflow-hidden my-4 border bg-zinc-950 shadow-md">
+            <div className="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-400 font-sans font-medium">{language}</span>
+                    {!isUser && ['jsx', 'tsx', 'html', 'react', 'javascript', 'js'].includes(language.toLowerCase()) && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 text-[10px] px-2 text-zinc-400 hover:text-white hover:bg-white/10"
+                            onClick={() => openArtifact(value)}
+                        >
+                            Open Preview
+                        </Button>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 text-zinc-400 hover:text-white hover:bg-white/10"
+                        onClick={onDownload}
+                        title="Download"
+                    >
+                        <Download className="w-3 h-3" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 text-zinc-400 hover:text-white hover:bg-white/10"
+                        onClick={onCopy}
+                        title="Copy Code"
+                    >
+                        {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                    </Button>
+                    <div className="flex gap-1.5 ml-1">
+                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/20" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-green-500/20" />
+                    </div>
+                </div>
+            </div>
+            <SyntaxHighlighter
+                style={vscDarkPlus}
+                language={language}
+                PreTag="div"
+                customStyle={{ margin: 0, padding: '1.5rem', background: 'transparent' }}
+            >
+                {value}
+            </SyntaxHighlighter>
+        </div>
+    )
 }
 
 export function MessageBubble({ id, role, content, provider, onEdit }: MessageBubbleProps) {
@@ -94,7 +183,7 @@ export function MessageBubble({ id, role, content, provider, onEdit }: MessageBu
 
             <div
                 className={cn(
-                    "relative max-w-[85%] rounded-[2rem] px-6 py-4 text-[15px] leading-relaxed md:max-w-[75%] lg:max-w-[65%]",
+                    "relative max-w-[85%] rounded-[2rem] px-6 py-4 text-[15px] leading-relaxed md:max-w-[75%] lg:max-w-[85%]",
                     isUser
                         ? "bg-primary text-primary-foreground order-1"
                         : "bg-muted text-foreground order-2"
@@ -120,25 +209,11 @@ export function MessageBubble({ id, role, content, provider, onEdit }: MessageBu
                                 code({ node, inline, className, children, ...props }: any) {
                                     const match = /language-(\w+)/.exec(className || '')
                                     return !inline && match ? (
-                                        <div className="rounded-xl overflow-hidden my-4 border bg-zinc-950 shadow-md">
-                                            <div className="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/10">
-                                                <span className="text-xs text-zinc-400 font-sans font-medium">{match[1]}</span>
-                                                <div className="flex gap-1.5">
-                                                    <div className="w-2.5 h-2.5 rounded-full bg-red-500/20" />
-                                                    <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20" />
-                                                    <div className="w-2.5 h-2.5 rounded-full bg-green-500/20" />
-                                                </div>
-                                            </div>
-                                            <SyntaxHighlighter
-                                                {...props}
-                                                style={vscDarkPlus}
-                                                language={match[1]}
-                                                PreTag="div"
-                                                customStyle={{ margin: 0, padding: '1.5rem', background: 'transparent' }}
-                                            >
-                                                {String(children).replace(/\n$/, '')}
-                                            </SyntaxHighlighter>
-                                        </div>
+                                        <CodeBlock
+                                            language={match[1]}
+                                            value={String(children).replace(/\n$/, '')}
+                                            isUser={isUser}
+                                        />
                                     ) : (
                                         <code {...props} className={cn("bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono", className)}>
                                             {children}

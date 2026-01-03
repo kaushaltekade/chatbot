@@ -5,7 +5,7 @@ import { useChatStore } from "@/store/chat-store"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { MessageSquarePlus, Settings, Trash2, MoreHorizontal, Search } from "lucide-react"
+import { MessageSquarePlus, Settings, Trash2, MoreHorizontal, Search, MessageSquare } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import Image from "next/image"
 import Link from "next/link"
@@ -16,6 +16,14 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog"
 
 export function ChatSidebar() {
     const {
@@ -23,8 +31,11 @@ export function ChatSidebar() {
         activeConversationId,
         selectConversation,
         createConversation,
-        deleteConversation
+        deleteConversation,
+        isArtifactFullscreen // Added
     } = useChatStore()
+
+
 
     const [searchQuery, setSearchQuery] = React.useState("")
 
@@ -36,40 +47,22 @@ export function ChatSidebar() {
         )
     }, [conversations, searchQuery])
 
-    // Group conversations by date
-    const groupedConversations = React.useMemo(() => {
-        const groups: Record<string, typeof conversations> = {
-            "Today": [],
-            "Yesterday": [],
-            "Previous 7 Days": [],
-            "Older": []
-        }
-
-        const now = new Date()
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-        const yesterday = new Date(today - 86400000).getTime()
-        const lastWeek = new Date(today - 86400000 * 7).getTime()
-
-        filteredConversations.sort((a, b) => b.lastUpdated - a.lastUpdated).forEach(conv => {
-            const date = new Date(conv.lastUpdated).getTime()
-            if (date >= today) {
-                groups["Today"].push(conv)
-            } else if (date >= yesterday) {
-                groups["Yesterday"].push(conv)
-            } else if (date >= lastWeek) {
-                groups["Previous 7 Days"].push(conv)
-            } else {
-                groups["Older"].push(conv)
-            }
-        })
-
-        return groups
+    // Sort conversations by date
+    const sortedConversations = React.useMemo(() => {
+        return [...filteredConversations].sort((a, b) => b.lastUpdated - a.lastUpdated)
     }, [filteredConversations])
 
-    const handleDelete = (e: React.MouseEvent, id: string) => {
+    const [chatToDelete, setChatToDelete] = React.useState<string | null>(null)
+
+    const handleDeleteClick = (e: React.MouseEvent, id: string) => {
         e.stopPropagation()
-        if (confirm("Are you sure you want to delete this chat?")) {
-            deleteConversation(id)
+        setChatToDelete(id)
+    }
+
+    const confirmDelete = () => {
+        if (chatToDelete) {
+            deleteConversation(chatToDelete)
+            setChatToDelete(null)
         }
     }
 
@@ -86,7 +79,7 @@ export function ChatSidebar() {
                     </div>
                     <div>
                         <h1 className="text-lg font-bold tracking-tight text-foreground leading-none">AAAOP</h1>
-                        <p className="text-[10px] text-muted-foreground font-medium tracking-wider">ALL AI IN ONE</p>
+                        <p className="text-[10px] text-muted-foreground font-medium tracking-wider">ALL AI AT ONE PLACE</p>
                     </div>
                 </div>
                 <Button
@@ -107,63 +100,43 @@ export function ChatSidebar() {
                 </div>
             </div>
 
-            <ScrollArea className="flex-1 p-3">
-                <div className="flex flex-col gap-6">
-                    {Object.entries(groupedConversations).map(([label, convs]) => (
-                        convs.length > 0 && (
-                            <div key={label} className="space-y-1">
-                                <h3 className="text-xs font-semibold text-muted-foreground/70 px-3 mb-2 uppercase tracking-wider">{label}</h3>
-                                {convs.map((chat) => (
-                                    <div
-                                        key={chat.id}
-                                        className="group relative"
-                                    >
-                                        <Button
-                                            variant={activeConversationId === chat.id ? "secondary" : "ghost"}
-                                            className={cn(
-                                                "w-full justify-start text-sm truncate h-auto py-2.5 pr-8 transition-all duration-200",
-                                                activeConversationId === chat.id
-                                                    ? "bg-secondary/80 text-secondary-foreground shadow-sm"
-                                                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                                            )}
-                                            onClick={() => selectConversation(chat.id)}
-                                        >
-                                            <span className="truncate flex-1 text-left">
-                                                {chat.title || "New Chat"}
-                                            </span>
-                                        </Button>
+            <ScrollArea className="flex-1 px-4 py-2">
+                <div className="flex flex-col gap-1">
+                    {sortedConversations.map((chat) => (
+                        <div
+                            key={chat.id}
+                            className="group relative grid grid-cols-[1fr_auto] items-center gap-2 w-full"
+                        >
+                            <Button
+                                variant={activeConversationId === chat.id ? "secondary" : "ghost"}
+                                className={cn(
+                                    "justify-start text-sm h-auto py-2.5 transition-all duration-200 border-0 rounded-lg min-w-0 w-full gap-2 px-2",
+                                    activeConversationId === chat.id
+                                        ? "bg-secondary/80 text-secondary-foreground shadow-sm font-medium"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50 font-normal"
+                                )}
+                                onClick={() => selectConversation(chat.id)}
+                            >
+                                <MessageSquare className="w-4 h-4 shrink-0" />
+                                <span className={cn(
+                                    "truncate w-full text-left transition-colors block",
+                                    activeConversationId === chat.id ? "text-foreground" : "text-muted-foreground group-hover:text-foreground"
+                                )}>
+                                    {chat.title || "New Chat"}
+                                </span>
+                            </Button>
 
-                                        {/* Action Menu (Visible on Group Hover or Active) */}
-                                        <div className={cn(
-                                            "absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity",
-                                            activeConversationId === chat.id && "opacity-100"
-                                        )}>
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-7 w-7 hover:bg-background/80"
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                        <MoreHorizontal className="w-4 h-4" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem
-                                                        className="text-destructive focus:text-destructive cursor-pointer"
-                                                        onClick={(e) => handleDelete(e, chat.id)}
-                                                    >
-                                                        <Trash2 className="w-4 h-4 mr-2" />
-                                                        Delete
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )
+                            {/* Delete Action (Grid Col 2) */}
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground/50 hover:text-red-500 hover:bg-red-500/10 rounded-md transition-all opacity-100"
+                                onClick={(e) => handleDeleteClick(e, chat.id)}
+                                title="Delete chat"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </Button>
+                        </div>
                     ))}
 
                     {conversations.length === 0 && (
@@ -188,6 +161,25 @@ export function ChatSidebar() {
                     </Button>
                 </Link>
             </div>
+
+            <Dialog open={!!chatToDelete} onOpenChange={(open) => !open && setChatToDelete(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete Chat?</DialogTitle>
+                        <DialogDescription>
+                            This will permanently delete this conversation. This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setChatToDelete(null)}>
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={confirmDelete}>
+                            Delete
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

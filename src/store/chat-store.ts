@@ -61,6 +61,18 @@ interface ChatStore {
     isSidebarOpen: boolean
     toggleSidebar: () => void
 
+    // Artifact State
+    isArtifactOpen: boolean
+    activeArtifactTab: "code" | "preview"
+    artifactContent: string | null
+    toggleArtifact: () => void
+    setArtifactContent: (content: string) => void
+    openArtifact: (content: string) => void
+
+    setActiveArtifactTab: (tab: "code" | "preview") => void
+    isArtifactFullscreen: boolean
+    setIsArtifactFullscreen: (min: boolean) => void
+
     // Data Management
     clearAllData: () => void
     syncWithSupabase: () => Promise<void> // Force sync
@@ -280,6 +292,19 @@ export const useChatStore = create<ChatStore>()(
 
             isSidebarOpen: true,
             toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+
+            isArtifactOpen: false,
+            activeArtifactTab: "preview",
+            artifactContent: null,
+            toggleArtifact: () => set((state) => ({
+                isArtifactOpen: !state.isArtifactOpen,
+                isArtifactFullscreen: false // Always exit fullscreen when toggling/closing
+            })),
+            setArtifactContent: (content) => set({ artifactContent: content }),
+            openArtifact: (content) => set({ artifactContent: content, isArtifactOpen: true }),
+            setActiveArtifactTab: (tab) => set({ activeArtifactTab: tab }),
+            isArtifactFullscreen: false,
+            setIsArtifactFullscreen: (val) => set({ isArtifactFullscreen: val }),
 
             clearAllData: () => set({
                 apiKeys: [],

@@ -1,4 +1,5 @@
-import { useState } from "react"
+
+import { useState, useEffect, useRef } from "react"
 import { useChatStore, Message } from "@/store/chat-store"
 import { formatTokenCount, estimateTokens } from "@/lib/token-utils"
 import { generateId } from "@/lib/utils"
@@ -12,15 +13,33 @@ export function useChatStream() {
         addMessage,
         updateMessage,
         deleteMessage,
-        setLoading,
-        isLoading,
-        apiKeys,
+        setLoading: setStoreLoading, // Rename to avoid conflict with local setLoading
         updateApiKey,
         createConversation,
+    } = useChatStore()
+
+    const [isLoading, setLoading] = useState(false)
+    const abortControllerRef = useRef<AbortController | null>(null)
+
+    const stop = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+            abortControllerRef.current = null
+            setLoading(false)
+            setStoreLoading(false) // Also update store's loading state
+            toast.info("Generation stopped")
+        }
+    }
+
+    const {
+        apiKeys,
+        activeConversationId,
         updateConversationTitle
     } = useChatStore()
 
     const [input, setInput] = useState("")
+
+
 
     const sortKeys = (keys: typeof apiKeys) => {
         return keys.sort((a, b) => {
@@ -126,7 +145,7 @@ export function useChatStream() {
         const keysToTry = getOrderedKeys(input)
 
         if (keysToTry.length === 0) {
-            const msg = "No active API keys found. Please add a key in Settings."
+            const msg = "No active API keys found (compatible with request). Please check Settings."
             toast.error(msg)
             return
         }
@@ -144,7 +163,7 @@ export function useChatStream() {
         // We check if messages are empty OR if we just created it.
         const currentMessages = useChatStore.getState().messages
         if (isNewConversation || currentMessages.length === 0) {
-            const title = input.slice(0, 30) + (input.length > 30 ? "..." : "")
+            const title = input.slice(0, 30) + (input.length > 30 ? "..." : "") || "Image Upload"
             if (currentActiveId) {
                 updateConversationTitle(currentActiveId, title)
             }
@@ -194,6 +213,11 @@ export function useChatStream() {
                 const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
 
                 try {
+                    // Abort previous if any
+                    if (abortControllerRef.current) abortControllerRef.current.abort()
+                    const ac = new AbortController()
+                    abortControllerRef.current = ac
+
                     const response = await fetch("/api/chat", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -205,12 +229,12 @@ export function useChatStream() {
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
                         }),
-                        signal: controller.signal
+                        signal: ac.signal
                     })
 
                     if (!response.ok) {
                         const err = await response.json()
-                        throw new Error(err.error || `Failed to fetch response from ${apiKey.provider}`)
+                        throw new Error(err.error || `Failed to fetch response from ${apiKey.provider} `)
                     }
 
                     if (!response.body) throw new Error("No response body")
@@ -259,12 +283,6 @@ export function useChatStream() {
                     const totalCost = inputTokens + outputTokens
 
                     // Re-read usage in case it changed (unlikely in single thread but good practice)
-                    // We use the apiKey object but we should fetch fresh or just add to what we know + what we reset
-                    // Better: read from store or just add to the locally 'reset' value?
-                    // Safe to just add to store state using functional update if possible, OR just read from apiKey object we have (it's ref might be stale).
-                    // Best: `updateApiKey` merges updates. We need to know the base.
-                    // The `checkAndResetUsage` might have updated the store.
-                    // Let's re-fetch key from store to be safe?
                     const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
                     const newUsage = (freshKey.usage || 0) + totalCost
 
@@ -276,9 +294,9 @@ export function useChatStream() {
                     if (apiKey.limit && apiKey.limit > 0) {
                         const percentage = newUsage / apiKey.limit
                         if (percentage >= 0.9) {
-                            toast.error(`CRITICAL: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider} (24h)`)
+                            toast.error(`CRITICAL: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}(24h)`)
                         } else if (percentage >= 0.8) {
-                            toast.warning(`Alert: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider} (24h)`)
+                            toast.warning(`Alert: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}(24h)`)
                         }
                     }
 
@@ -289,13 +307,13 @@ export function useChatStream() {
                 } catch (innerError: any) {
                     clearTimeout(timeoutId)
                     if (innerError.name === 'AbortError') {
-                        throw new Error(`Connection timed out after ${timeoutDuration / 1000}s`)
+                        throw new Error(`Connection timed out after ${timeoutDuration / 1000} s`)
                     }
                     throw innerError
                 }
 
             } catch (error: any) {
-                console.error(`Error with ${apiKey.provider}:`, error)
+                console.error(`Error with ${apiKey.provider}: `, error)
                 lastError = error
 
                 const twentyFourHours = 24 * 60 * 60 * 1000
@@ -354,6 +372,7 @@ export function useChatStream() {
 
         setLoading(true)
 
+        // Check for images in the LAST USER MESSAGE
         const keysToTry = getOrderedKeys(lastUserMsg.content)
 
         if (keysToTry.length === 0) {
@@ -388,6 +407,10 @@ export function useChatStream() {
                 const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
 
                 try {
+                    if (abortControllerRef.current) abortControllerRef.current.abort()
+                    const ac = new AbortController()
+                    abortControllerRef.current = ac
+
                     const response = await fetch("/api/chat", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -399,7 +422,7 @@ export function useChatStream() {
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
                         }),
-                        signal: controller.signal
+                        signal: ac.signal
                     })
 
                     if (!response.ok) {
@@ -449,12 +472,12 @@ export function useChatStream() {
 
                 } catch (innerError: any) {
                     clearTimeout(timeoutId)
-                    if (innerError.name === 'AbortError') throw new Error(`Timeout ${timeoutDuration / 1000}s`)
+                    if (innerError.name === 'AbortError') throw new Error(`Timeout ${timeoutDuration / 1000} s`)
                     throw innerError
                 }
 
             } catch (error: any) {
-                console.error(`Error with ${apiKey.provider}:`, error)
+                console.error(`Error with ${apiKey.provider}: `, error)
                 lastError = error
                 const twentyFourHours = 24 * 60 * 60 * 1000
                 updateApiKey(apiKey.id, {
@@ -498,6 +521,8 @@ export function useChatStream() {
 
         // 4. Trigger submission
         setLoading(true)
+
+        // Check if the edited message had images
         const keysToTry = getOrderedKeys(newContent)
 
         if (keysToTry.length === 0) {
@@ -591,12 +616,12 @@ export function useChatStream() {
 
                 } catch (innerError: any) {
                     clearTimeout(timeoutId)
-                    if (innerError.name === 'AbortError') throw new Error(`Timeout ${timeoutDuration / 1000}s`)
+                    if (innerError.name === 'AbortError') throw new Error(`Timeout ${timeoutDuration / 1000} s`)
                     throw innerError
                 }
 
             } catch (error: any) {
-                console.error(`Error with ${apiKey.provider}:`, error)
+                console.error(`Error with ${apiKey.provider}: `, error)
                 lastError = error
                 const twentyFourHours = 24 * 60 * 60 * 1000
                 updateApiKey(apiKey.id, {
@@ -623,6 +648,7 @@ export function useChatStream() {
         handleSubmit,
         handleRegenerate,
         handleEdit,
+        stop,
         isLoading,
         messages
     }
