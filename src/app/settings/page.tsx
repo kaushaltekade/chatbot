@@ -1,6 +1,7 @@
 "use client"
 
 import { ApiKeyManager } from "@/components/settings/api-key-manager"
+import { SystemPromptSettings } from "@/components/settings/system-prompt-settings"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
@@ -18,6 +19,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="grid gap-8">
+                <SystemPromptSettings />
                 <ApiKeyManager />
             </div>
         </div>

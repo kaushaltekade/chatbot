@@ -198,14 +198,10 @@ export function useChatStream() {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            messages: [...useChatStore.getState().messages.slice(0, -1), userMsg].map(m => ({ role: m.role, content: m.content })), // Use fresh state, excluding the empty assistant placeholder we just added? No, addMessage updates store.
-                            // Actually, store.messages includes the empty assistant message now. We should exclude it for the API call.
-                            // The userMsg IS in the store. 
-                            // The assistantMsg IS in the store (empty). 
-                            // So we want all messages EXCEPT the last one (assistant placeholder).
-                            // Correct logic:
-                            // messages already has userMsg (added above) and assistantMsg (added above).
-                            // We need to send everything UP TO userMsg.
+                            messages: [
+                                ...(useChatStore.getState().systemPrompt ? [{ role: "system", content: useChatStore.getState().systemPrompt }] : []),
+                                ...[...useChatStore.getState().messages.slice(0, -1), userMsg].map(m => ({ role: m.role, content: m.content }))
+                            ],
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
                         }),
@@ -396,7 +392,10 @@ export function useChatStream() {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            messages: historyForRegen.map(m => ({ role: m.role, content: m.content })),
+                            messages: [
+                                ...(useChatStore.getState().systemPrompt ? [{ role: "system", content: useChatStore.getState().systemPrompt }] : []),
+                                ...historyForRegen.map(m => ({ role: m.role, content: m.content }))
+                            ],
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
                         }),
@@ -534,7 +533,11 @@ export function useChatStream() {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            messages: historyForApi.map(m => ({ role: m.role, content: m.content })),
+                            // Construct messages with System Prompt
+                            messages: [
+                                ...(useChatStore.getState().systemPrompt ? [{ role: "system", content: useChatStore.getState().systemPrompt }] : []),
+                                ...historyForApi.map(m => ({ role: m.role, content: m.content }))
+                            ],
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
                         }),

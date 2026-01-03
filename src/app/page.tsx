@@ -82,7 +82,7 @@ export default function Home() {
                   suppressHydrationWarning
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Message AAIOP..."
+                  placeholder="Message AAAOP..."
                   className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-5 py-3.5 h-auto min-h-[52px] max-h-48 resize-none mb-6"
                   autoFocus
                 />
@@ -121,8 +121,8 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="text-xs text-center text-muted-foreground mt-2">
-                AAIOP can make mistakes. Check important info.
+              <div className="text-center text-xs text-muted-foreground/50 py-2">
+                AAAOP can make mistakes. Consider checking important information.
               </div>
             </div>
           </div>

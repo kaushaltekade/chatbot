@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Trash2, Plus, Eye, EyeOff, GripVertical, AlertTriangle, Download, FileJson } from "lucide-react"
+import { Trash2, Plus, Eye, EyeOff, GripVertical, AlertTriangle, Download, FileJson, Pencil } from "lucide-react"
 import { cn, generateId } from "@/lib/utils"
 import { useMounted } from "@/hooks/use-mounted"
 import {
@@ -19,6 +19,7 @@ import {
     useSensors,
     DragEndEvent
 } from '@dnd-kit/core';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import { Brain } from "lucide-react"
 import {
@@ -190,6 +191,17 @@ export function ApiKeyManager() {
         a.click()
     }
 
+    const [editingKey, setEditingKey] = useState<import("@/store/chat-store").ApiKey | null>(null)
+
+    const handleUpdateKey = () => {
+        if (!editingKey) return
+        updateApiKey(editingKey.id, {
+            limit: editingKey.limit,
+            label: editingKey.label
+        })
+        setEditingKey(null)
+    }
+
     return (
         <>
             <Card className="w-full max-w-4xl mx-auto">
@@ -358,9 +370,14 @@ export function ApiKeyManager() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <Button variant="ghost" size="icon" onClick={() => deleteApiKey(key.id)}>
-                                                        <Trash2 className="w-4 h-4 text-destructive" />
-                                                    </Button>
+                                                    <div className="flex justify-end gap-1">
+                                                        <Button variant="ghost" size="icon" onClick={() => setEditingKey(key)}>
+                                                            <Pencil className="w-4 h-4 text-muted-foreground" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" onClick={() => deleteApiKey(key.id)}>
+                                                            <Trash2 className="w-4 h-4 text-destructive" />
+                                                        </Button>
+                                                    </div>
                                                 </TableCell>
                                             </SortableRow>
                                         ))}
@@ -371,6 +388,43 @@ export function ApiKeyManager() {
                     </div>
                 </CardContent>
             </Card>
+
+            <Dialog open={!!editingKey} onOpenChange={(open) => !open && setEditingKey(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit API Key</DialogTitle>
+                        <DialogDescription>
+                            Modify the settings for this {editingKey?.provider} key.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {editingKey && (
+                        <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <label className="text-right text-sm font-medium">Label</label>
+                                <Input
+                                    value={editingKey.label || ""}
+                                    onChange={(e) => setEditingKey({ ...editingKey, label: e.target.value })}
+                                    className="col-span-3"
+                                    placeholder="Optional label (e.g. Personal Key)"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <label className="text-right text-sm font-medium">Limit</label>
+                                <Input
+                                    type="number"
+                                    value={editingKey.limit || 0}
+                                    onChange={(e) => setEditingKey({ ...editingKey, limit: parseInt(e.target.value) || 0 })}
+                                    className="col-span-3"
+                                />
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingKey(null)}>Cancel</Button>
+                        <Button onClick={handleUpdateKey}>Save Changes</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Card className="w-full max-w-4xl mx-auto mt-6 border-red-200 dark:border-red-900/50">
                 <CardHeader>

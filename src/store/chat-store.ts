@@ -68,6 +68,8 @@ interface ChatStore {
     // PREFERENCES
     smartRoutingEnabled: boolean
     toggleSmartRouting: () => void
+    systemPrompt: string
+    setSystemPrompt: (prompt: string) => void
 }
 
 // Helpers for Supabase DB
@@ -129,9 +131,6 @@ async function upsertApiKeyToDB(key: ApiKey) {
             limit: key.limit,
             label: key.label,
             is_active: key.isActive,
-            // rateLimitedUntil is transient, maybe don't persist or persist as separate field? 
-            // For simplicity, let's ignore it or add it if needed. The schema didn't have it explicitly mapped in my previous SQL but passing extras is fine if column exists.
-            // Actually my proposed SQL didn't have rateLimitedUntil. Let's skip it for now or add it to SQL if vital.
         })
     if (error) console.error("Failed to sync api_key:", error)
 }
@@ -360,14 +359,18 @@ export const useChatStore = create<ChatStore>()(
             },
 
             smartRoutingEnabled: false,
-            toggleSmartRouting: () => set(state => ({ smartRoutingEnabled: !state.smartRoutingEnabled }))
+            toggleSmartRouting: () => set(state => ({ smartRoutingEnabled: !state.smartRoutingEnabled })),
+
+            systemPrompt: "",
+            setSystemPrompt: (prompt) => set({ systemPrompt: prompt })
         }),
         {
             name: 'chatbot-storage',
             partialize: (state) => ({
                 apiKeys: state.apiKeys,
                 conversations: state.conversations,
-                smartRoutingEnabled: state.smartRoutingEnabled
+                smartRoutingEnabled: state.smartRoutingEnabled,
+                systemPrompt: state.systemPrompt
             }),
             onRehydrateStorage: () => (state) => {
                 // Check auth on load and sync

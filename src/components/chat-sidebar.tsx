@@ -1,11 +1,13 @@
 "use client"
+
 import * as React from "react"
 import { useChatStore } from "@/store/chat-store"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-// import { MessageSquarePlus, Settings, History, Trash2, MoreHorizontal } from "lucide-react" // Optimized imports below
-import { MessageSquarePlus, Settings, Trash2, MoreHorizontal } from "lucide-react"
+import { MessageSquarePlus, Settings, Trash2, MoreHorizontal, Search } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import Image from "next/image"
 import Link from "next/link"
 import { AuthButtons } from "@/components/auth/auth-buttons"
 import {
@@ -14,7 +16,6 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 export function ChatSidebar() {
     const {
@@ -24,6 +25,16 @@ export function ChatSidebar() {
         createConversation,
         deleteConversation
     } = useChatStore()
+
+    const [searchQuery, setSearchQuery] = React.useState("")
+
+    // Filter conversations based on search
+    const filteredConversations = React.useMemo(() => {
+        if (!searchQuery.trim()) return conversations
+        return conversations.filter(c =>
+            c.title.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+    }, [conversations, searchQuery])
 
     // Group conversations by date
     const groupedConversations = React.useMemo(() => {
@@ -39,7 +50,7 @@ export function ChatSidebar() {
         const yesterday = new Date(today - 86400000).getTime()
         const lastWeek = new Date(today - 86400000 * 7).getTime()
 
-        conversations.sort((a, b) => b.lastUpdated - a.lastUpdated).forEach(conv => {
+        filteredConversations.sort((a, b) => b.lastUpdated - a.lastUpdated).forEach(conv => {
             const date = new Date(conv.lastUpdated).getTime()
             if (date >= today) {
                 groups["Today"].push(conv)
@@ -53,7 +64,7 @@ export function ChatSidebar() {
         })
 
         return groups
-    }, [conversations])
+    }, [filteredConversations])
 
     const handleDelete = (e: React.MouseEvent, id: string) => {
         e.stopPropagation()
@@ -63,8 +74,21 @@ export function ChatSidebar() {
     }
 
     return (
-        <div className="w-[280px] h-screen bg-background/60 backdrop-blur-xl border-r border-white/10 flex flex-col shadow-2xl relative z-50">
-            <div className="p-4 border-b border-white/10">
+        <div className="w-[280px] h-screen bg-background/95 backdrop-blur-xl border-r border-white/10 flex flex-col shadow-2xl relative z-50">
+            <div className="p-4 border-b border-white/10 space-y-4">
+                <div className="flex items-center gap-3 px-1">
+                    <div className="relative w-8 h-8 shrink-0">
+                        <img
+                            src="/file.svg"
+                            alt="Logo"
+                            className="w-full h-full object-contain"
+                        />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-bold tracking-tight text-foreground leading-none">AAAOP</h1>
+                        <p className="text-[10px] text-muted-foreground font-medium tracking-wider">ALL AI IN ONE</p>
+                    </div>
+                </div>
                 <Button
                     onClick={() => createConversation()}
                     className="w-full justify-start gap-2 bg-primary/90 hover:bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
@@ -72,6 +96,15 @@ export function ChatSidebar() {
                     <MessageSquarePlus className="w-4 h-4" />
                     New Chat
                 </Button>
+                <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Search chats..."
+                        className="pl-8 h-9 bg-secondary border-transparent focus:bg-background transition-all"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
             </div>
 
             <ScrollArea className="flex-1 p-3">
@@ -136,6 +169,11 @@ export function ChatSidebar() {
                     {conversations.length === 0 && (
                         <div className="text-center text-muted-foreground text-sm py-8 px-4">
                             No chats yet.<br />Start a new conversation!
+                        </div>
+                    )}
+                    {conversations.length > 0 && filteredConversations.length === 0 && (
+                        <div className="text-center text-muted-foreground text-sm py-8 px-4">
+                            No chats found matching "{searchQuery}"
                         </div>
                     )}
                 </div>

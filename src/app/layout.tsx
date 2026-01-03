@@ -8,8 +8,13 @@ import { Toaster } from "@/components/ui/sonner"
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "AAIOP",
-  description: "ALL AI IN ONE PLACE - Chat with multiple AI providers",
+  title: "AAAOP - All AI At One Place",
+  description: "Your comprehensive AI assistant hub.",
+  icons: {
+    icon: "/file.svg",
+    shortcut: "/file.svg",
+    apple: "/file.svg",
+  }
 };
 
 export default function RootLayout({
