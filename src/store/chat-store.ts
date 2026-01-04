@@ -62,9 +62,9 @@ interface ChatStore {
     toggleConversationPin: (id: string) => void
     updateConversationTitle: (id: string, title: string) => void
     selectConversation: (id: string) => void
-    addMessage: (message: Message) => void
-    updateMessage: (id: string, content: string, provider?: string) => void
-    deleteMessage: (id: string) => void
+    addMessage: (message: Message, conversationId?: string) => void
+    updateMessage: (id: string, content: string, provider?: string, conversationId?: string) => void
+    deleteMessage: (id: string, conversationId?: string) => void
     setLoading: (loading: boolean) => void
 
     // Folder Actions
@@ -76,6 +76,14 @@ interface ChatStore {
     // Basic UI state
     isSidebarOpen: boolean
     toggleSidebar: () => void
+
+    // Split View (Arena) State
+    splitViewMode: boolean
+    activePane: 'primary' | 'secondary'
+    secondaryConversationId: string | null
+    setSplitViewMode: (enabled: boolean) => void
+    setActivePane: (pane: 'primary' | 'secondary') => void
+    setSecondaryConversationId: (id: string | null) => void
 
     // Artifact State
     isArtifactOpen: boolean
@@ -235,11 +243,17 @@ export const useChatStore = create<ChatStore>()(
                     messages: [],
                     lastUpdated: Date.now()
                 }
-                set(state => ({
-                    conversations: [newConv, ...state.conversations],
-                    activeConversationId: newConv.id,
-                    messages: []
-                }))
+                set(state => {
+                    const updates: any = { conversations: [newConv, ...state.conversations] }
+                    if (state.splitViewMode && state.activePane === 'secondary') {
+                        updates.secondaryConversationId = newConv.id
+                    } else {
+                        // Default behavior
+                        updates.activeConversationId = newConv.id
+                        updates.messages = []
+                    }
+                    return updates
+                })
                 upsertConversationToDB(newConv)
             },
             toggleConversationPin: (id) => {
@@ -281,61 +295,98 @@ export const useChatStore = create<ChatStore>()(
                 })
             },
             selectConversation: (id) => {
-                set(state => ({
-                    activeConversationId: id,
-                    messages: state.conversations.find(c => c.id === id)?.messages || []
-                }))
-            },
-            addMessage: (message) => {
                 set(state => {
-                    const newMessages = [...state.messages, message]
+                    if (state.splitViewMode && state.activePane === 'secondary') {
+                        return { secondaryConversationId: id }
+                    }
+                    return {
+                        activeConversationId: id,
+                        messages: state.conversations.find(c => c.id === id)?.messages || []
+                    }
+                })
+            },
+            addMessage: (message, conversationId) => {
+                set(state => {
+                    const targetId = conversationId || state.activeConversationId
+                    if (!targetId) return {}
+
+                    // Update global 'messages' ONLY if target is active
+                    const shouldUpdateGlobal = targetId === state.activeConversationId
+                    const newGlobalMessages = shouldUpdateGlobal ? [...state.messages, message] : state.messages
+
                     const updatedConversations = state.conversations.map(c =>
-                        c.id === state.activeConversationId
-                            ? { ...c, messages: newMessages, lastUpdated: Date.now() }
+                        c.id === targetId
+                            ? { ...c, messages: [...c.messages, message], lastUpdated: Date.now() }
                             : c
                     )
 
                     // Sync to DB
-                    if (state.activeConversationId) {
-                        upsertMessageToDB(message, state.activeConversationId)
-                        const conv = updatedConversations.find(c => c.id === state.activeConversationId)
-                        if (conv) upsertConversationToDB(conv)
-                    }
+                    upsertMessageToDB(message, targetId)
+                    const conv = updatedConversations.find(c => c.id === targetId)
+                    if (conv) upsertConversationToDB(conv)
 
-                    return { messages: newMessages, conversations: updatedConversations }
+                    // If we updated global, return it. Otherwise just conversations.
+                    return shouldUpdateGlobal
+                        ? { messages: newGlobalMessages, conversations: updatedConversations }
+                        : { conversations: updatedConversations }
                 })
             },
-            updateMessage: (id, content, provider) => {
+            updateMessage: (id, content, provider, conversationId) => {
                 set(state => {
-                    const newMessages = state.messages.map(m =>
-                        m.id === id ? { ...m, content, ...(provider ? { provider } : {}) } : m
-                    )
+                    const targetId = conversationId || state.activeConversationId
+                    if (!targetId) return {}
+
+                    const shouldUpdateGlobal = targetId === state.activeConversationId
+
+                    // Update global messages if needed
+                    const newGlobalMessages = shouldUpdateGlobal
+                        ? state.messages.map(m => m.id === id ? { ...m, content, ...(provider ? { provider } : {}) } : m)
+                        : state.messages
+
+                    // Update conversations
                     const updatedConversations = state.conversations.map(c =>
-                        c.id === state.activeConversationId
-                            ? { ...c, messages: newMessages }
+                        c.id === targetId
+                            ? {
+                                ...c,
+                                messages: c.messages.map(m => m.id === id ? { ...m, content, ...(provider ? { provider } : {}) } : m)
+                            }
                             : c
                     )
 
-                    const msg = newMessages.find(m => m.id === id)
-                    if (msg && state.activeConversationId) {
-                        upsertMessageToDB(msg, state.activeConversationId)
+                    const conv = updatedConversations.find(c => c.id === targetId)
+                    const msg = conv?.messages.find(m => m.id === id)
+
+                    if (msg) {
+                        upsertMessageToDB(msg, targetId)
                     }
 
-                    return { messages: newMessages, conversations: updatedConversations }
+                    return shouldUpdateGlobal
+                        ? { messages: newGlobalMessages, conversations: updatedConversations }
+                        : { conversations: updatedConversations }
                 })
             },
-            deleteMessage: (id) => {
+            deleteMessage: (id, conversationId) => {
                 set(state => {
-                    const newMessages = state.messages.filter(m => m.id !== id)
+                    const targetId = conversationId || state.activeConversationId
+                    if (!targetId) return {}
+
+                    const shouldUpdateGlobal = targetId === state.activeConversationId
+
+                    const newGlobalMessages = shouldUpdateGlobal
+                        ? state.messages.filter(m => m.id !== id)
+                        : state.messages
+
                     const updatedConversations = state.conversations.map(c =>
-                        c.id === state.activeConversationId
-                            ? { ...c, messages: newMessages }
+                        c.id === targetId
+                            ? { ...c, messages: c.messages.filter(m => m.id !== id) }
                             : c
                     )
 
                     deleteMessageFromDB(id)
 
-                    return { messages: newMessages, conversations: updatedConversations }
+                    return shouldUpdateGlobal
+                        ? { messages: newGlobalMessages, conversations: updatedConversations }
+                        : { conversations: updatedConversations }
                 })
             },
 
@@ -383,6 +434,14 @@ export const useChatStore = create<ChatStore>()(
             }),
 
             setLoading: (loading) => set({ isLoading: loading }),
+
+            // Split View State
+            splitViewMode: false,
+            activePane: 'primary',
+            secondaryConversationId: null,
+            setSplitViewMode: (enabled) => set({ splitViewMode: enabled }),
+            setActivePane: (pane) => set({ activePane: pane }),
+            setSecondaryConversationId: (id) => set({ secondaryConversationId: id }),
 
             isSidebarOpen: true,
             toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),

@@ -60,7 +60,11 @@ export function ChatSidebar() {
         createFolder,
         deleteFolder,
         renameFolder,
-        moveChatToFolder
+        moveChatToFolder,
+        // Split View State
+        splitViewMode,
+        activePane,
+        secondaryConversationId
     } = useChatStore()
 
     const [searchQuery, setSearchQuery] = React.useState("")
@@ -77,6 +81,8 @@ export function ChatSidebar() {
             setExpandedFolders(new Set(folders.map(f => f.id)))
         }
     }, [folders.length])
+
+    const targetId = (splitViewMode && activePane === 'secondary') ? secondaryConversationId : activeConversationId
 
     const toggleFolder = (folderId: string) => {
         const newExpanded = new Set(expandedFolders)
@@ -158,6 +164,8 @@ export function ChatSidebar() {
                     </div>
                 </div>
 
+
+
                 <div className="flex gap-2">
                     <Button
                         onClick={() => createConversation()}
@@ -168,12 +176,12 @@ export function ChatSidebar() {
                     </Button>
                     <Button
                         onClick={handleCreateFolder}
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 shrink-0"
+                        variant="secondary"
+                        className="flex-1 justify-start gap-2 text-xs h-9 px-3 bg-secondary/80 hover:bg-secondary"
                         title="New Folder"
                     >
                         <FolderPlus className="w-4 h-4" />
+                        New Folder
                     </Button>
                 </div>
 
@@ -242,7 +250,7 @@ export function ChatSidebar() {
                                         <ChatItem
                                             key={chat.id}
                                             chat={chat}
-                                            isActive={activeConversationId === chat.id}
+                                            isActive={targetId === chat.id}
                                             onSelect={() => selectConversation(chat.id)}
                                             onDelete={() => handleDeleteClick(chat.id)}
                                             onPin={toggleConversationPin}
@@ -265,7 +273,7 @@ export function ChatSidebar() {
                         <ChatItem
                             key={chat.id}
                             chat={chat}
-                            isActive={activeConversationId === chat.id}
+                            isActive={targetId === chat.id}
                             onSelect={() => selectConversation(chat.id)}
                             onDelete={() => handleDeleteClick(chat.id)}
                             onPin={toggleConversationPin}
@@ -329,7 +337,7 @@ export function ChatSidebar() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     )
 }
 

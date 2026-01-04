@@ -7,16 +7,32 @@ import { toast } from "sonner"
 
 
 
-export function useChatStream() {
+export function useChatStream(conversationId?: string) {
     const {
-        messages,
+        messages: globalMessages, // Renamed to avoid conflict with local 'messages'
+        conversations,
         addMessage,
         updateMessage,
         deleteMessage,
         setLoading: setStoreLoading, // Rename to avoid conflict with local setLoading
         updateApiKey,
         createConversation,
+        apiKeys, // Moved here
+        activeConversationId: globalActiveId, // Renamed
+        updateConversationTitle,
+        smartRoutingEnabled, // Added
+        systemPrompt // Added
     } = useChatStore()
+
+    // Resolve effective ID: explicit prop > global active ID
+    // If neither exists, we are in a "new chat" state effectively
+    const activeId = conversationId || globalActiveId || undefined
+
+    // Filter messages for this specific conversation
+    // If no activeId, we show empty list (or if strictly new chat)
+    const messages = activeId
+        ? conversations.find(c => c.id === activeId)?.messages || []
+        : []
 
     const [isLoading, setLoading] = useState(false)
     const abortControllerRef = useRef<AbortController | null>(null)
@@ -30,12 +46,6 @@ export function useChatStream() {
             toast.info("Generation stopped")
         }
     }
-
-    const {
-        apiKeys,
-        activeConversationId,
-        updateConversationTitle
-    } = useChatStore()
 
     const [input, setInput] = useState("")
 
@@ -55,15 +65,15 @@ export function useChatStream() {
     }
 
     const getOrderedKeys = (inputPrompt: string) => {
-        const { smartRoutingEnabled } = useChatStore.getState()
+        // const { smartRoutingEnabled } = useChatStore.getState() // Removed, now directly from store
         const now = Date.now()
-        let activeKeys = apiKeys.filter(k => {
+        let activeKeys = apiKeys.filter(k => { // apiKeys is now directly available
             if (!k.isActive) return false
             if (k.rateLimitedUntil && k.rateLimitedUntil > now) return false
             return true
         })
 
-        if (!smartRoutingEnabled) {
+        if (!smartRoutingEnabled) { // Use directly
             return sortKeys(activeKeys)
         }
 
@@ -151,22 +161,27 @@ export function useChatStream() {
         }
 
         // 1. Ensure Conversation Exists
-        let currentActiveId = useChatStore.getState().activeConversationId
+        // Use the resolved activeId. If null, create one.
+        let effectiveConversationId = activeId
         let isNewConversation = false
-        if (!currentActiveId) {
+
+        if (!effectiveConversationId) {
+            // Note: createConversation currently updates global activeId.
+            // If we are in a split pane with no ID, this might affect global state.
+            // For now, accept that creating a chat makes it global active.
             createConversation()
-            currentActiveId = useChatStore.getState().activeConversationId
+            effectiveConversationId = useChatStore.getState().activeConversationId || undefined
             isNewConversation = true
         }
 
+        if (!effectiveConversationId) return // Should not happen
+
         // 2. Auto-Title if it's the first message (or new conversation)
         // We check if messages are empty OR if we just created it.
-        const currentMessages = useChatStore.getState().messages
-        if (isNewConversation || currentMessages.length === 0) {
+        // Use the local 'messages' derived from activeId
+        if (isNewConversation || messages.length === 0) {
             const title = input.slice(0, 30) + (input.length > 30 ? "..." : "") || "Image Upload"
-            if (currentActiveId) {
-                updateConversationTitle(currentActiveId, title)
-            }
+            updateConversationTitle(effectiveConversationId, title)
         }
 
         const userMsg: Message = {
@@ -176,18 +191,20 @@ export function useChatStream() {
             tokens: estimateTokens(input)
         }
 
-        addMessage(userMsg)
+        // @ts-ignore - addMessage needs to be updated to accept conversationId
+        addMessage(userMsg, effectiveConversationId)
         setInput("")
         setLoading(true)
 
         // Initial Assistant Message placeholder
         let assistantMsgId = generateId()
+        // @ts-ignore - addMessage needs to be updated to accept conversationId
         addMessage({
             id: assistantMsgId,
             role: "assistant",
             content: "",
             tokens: 0
-        })
+        }, effectiveConversationId)
 
         let lastError: Error | null = null
         let success = false
@@ -223,8 +240,9 @@ export function useChatStream() {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             messages: [
-                                ...(useChatStore.getState().systemPrompt ? [{ role: "system", content: useChatStore.getState().systemPrompt }] : []),
-                                ...[...useChatStore.getState().messages.slice(0, -1), userMsg].map(m => ({ role: m.role, content: m.content }))
+                                ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), // Use directly
+                                ...messages.map(m => ({ role: m.role, content: m.content })), // Use local 'messages'
+                                { role: userMsg.role, content: userMsg.content } // Add the user message we just sent
                             ],
                             providerId: apiKey.provider,
                             apiKey: apiKey.key
@@ -264,7 +282,8 @@ export function useChatStream() {
 
                                     if (data.content) {
                                         assistantContent += data.content
-                                        updateMessage(assistantMsgId, assistantContent, apiKey.provider)
+                                        // @ts-ignore - updateMessage needs to be updated to accept conversationId
+                                        updateMessage(assistantMsgId, assistantContent, apiKey.provider, effectiveConversationId)
                                     }
                                 } catch (e) {
                                     // ignore parse errors for partial chunks
@@ -283,7 +302,7 @@ export function useChatStream() {
                     const totalCost = inputTokens + outputTokens
 
                     // Re-read usage in case it changed (unlikely in single thread but good practice)
-                    const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
+                    const freshKey = apiKeys.find(k => k.id === apiKey.id) || apiKey // Use local apiKeys
                     const newUsage = (freshKey.usage || 0) + totalCost
 
                     updateApiKey(apiKey.id, {
@@ -300,7 +319,8 @@ export function useChatStream() {
                         }
                     }
 
-                    updateMessage(assistantMsgId, assistantContent, apiKey.provider)
+                    // @ts-ignore - updateMessage needs to be updated to accept conversationId
+                    updateMessage(assistantMsgId, assistantContent, apiKey.provider, effectiveConversationId)
                     success = true
                     break // Stop loop on success
 
@@ -326,14 +346,16 @@ export function useChatStream() {
                     const nextProvider = keysToTry[keysToTry.indexOf(apiKey) + 1].provider
 
                     // Cleanup failed message
-                    deleteMessage(assistantMsgId)
+                    // @ts-ignore - deleteMessage needs to be updated to accept conversationId
+                    deleteMessage(assistantMsgId, effectiveConversationId)
                     assistantMsgId = generateId()
+                    // @ts-ignore - addMessage needs to be updated to accept conversationId
                     addMessage({
                         id: assistantMsgId,
                         role: "assistant",
                         content: "",
                         tokens: 0
-                    })
+                    }, effectiveConversationId)
 
                     toast.warning(`Error with ${apiKey.provider}. Switching to ${nextProvider}... (Context Preserved)`, {
                         description: "Your full conversation history is being sent to the next provider.",
@@ -347,26 +369,28 @@ export function useChatStream() {
         if (!success) {
             const finalErrorMsg = lastError?.message || "All providers failed."
             toast.error(finalErrorMsg)
-            updateMessage(assistantMsgId, "Error: " + finalErrorMsg)
+            // @ts-ignore - updateMessage needs to be updated to accept conversationId
+            updateMessage(assistantMsgId, "Error: " + finalErrorMsg, undefined, effectiveConversationId)
         }
 
         setLoading(false)
     }
 
     const handleRegenerate = async () => {
-        const currentMessages = useChatStore.getState().messages
-        if (currentMessages.length === 0) return
+        // Use local 'messages'
+        if (messages.length === 0) return
 
-        const lastMessage = currentMessages[currentMessages.length - 1]
+        const lastMessage = messages[messages.length - 1]
 
         // Ensure last message is from assistant
         if (lastMessage.role !== 'assistant') return
 
         // 1. Delete the last assistant message
-        deleteMessage(lastMessage.id)
+        // @ts-ignore - deleteMessage needs to be updated to accept conversationId
+        deleteMessage(lastMessage.id, activeId)
 
         // 2. Find the last user message to use as prompt
-        const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user')
+        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
 
         if (!lastUserMsg) return
 
@@ -383,18 +407,20 @@ export function useChatStream() {
 
         // Placeholder for new response
         let assistantMsgId = generateId()
+        // @ts-ignore - addMessage needs to be updated to accept conversationId
         addMessage({
             id: assistantMsgId,
             role: "assistant",
             content: "",
             tokens: 0
-        })
+        }, activeId)
 
         let lastError: Error | null = null
         let success = false
 
         // We act on the history WITHOUT the just-deleted assistant message
-        const historyForRegen = currentMessages.slice(0, -1)
+        // Use the local 'messages' and slice it
+        const historyForRegen = messages.slice(0, -1)
 
         for (const apiKey of keysToTry) {
             try {
@@ -416,7 +442,7 @@ export function useChatStream() {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             messages: [
-                                ...(useChatStore.getState().systemPrompt ? [{ role: "system", content: useChatStore.getState().systemPrompt }] : []),
+                                ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), // Use directly
                                 ...historyForRegen.map(m => ({ role: m.role, content: m.content }))
                             ],
                             providerId: apiKey.provider,
@@ -451,7 +477,8 @@ export function useChatStream() {
                                     if (data.isDone) continue
                                     if (data.content) {
                                         assistantContent += data.content
-                                        updateMessage(assistantMsgId, assistantContent)
+                                        // @ts-ignore - updateMessage needs to be updated to accept conversationId
+                                        updateMessage(assistantMsgId, assistantContent, undefined, activeId)
                                     }
                                 } catch (e) { }
                             }
@@ -463,10 +490,11 @@ export function useChatStream() {
                     const inputTokens = lastUserMsg.tokens || 0
                     const outputTokens = estimateTokens(assistantContent)
 
-                    const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
+                    const freshKey = apiKeys.find(k => k.id === apiKey.id) || apiKey // Use local apiKeys
                     updateApiKey(apiKey.id, { usage: (freshKey.usage || 0) + inputTokens + outputTokens })
 
-                    updateMessage(assistantMsgId, assistantContent, apiKey.provider)
+                    // @ts-ignore - updateMessage needs to be updated to accept conversationId
+                    updateMessage(assistantMsgId, assistantContent, apiKey.provider, activeId)
                     success = true
                     break
 
@@ -493,30 +521,40 @@ export function useChatStream() {
         if (!success) {
             const finalErrorMsg = lastError?.message || "Failed to regenerate."
             toast.error(finalErrorMsg)
-            updateMessage(assistantMsgId, "Error: " + finalErrorMsg)
+            // @ts-ignore - updateMessage needs to be updated to accept conversationId
+            updateMessage(assistantMsgId, "Error: " + finalErrorMsg, undefined, activeId)
         }
         setLoading(false)
     }
 
     const handleEdit = async (messageId: string, newContent: string) => {
-        const currentMessages = useChatStore.getState().messages
-        const msgIndex = currentMessages.findIndex(m => m.id === messageId)
+        // Use local 'messages'
+        const msgIndex = messages.findIndex(m => m.id === messageId)
 
         if (msgIndex === -1) return
 
         // 1. Truncate history
-        const newHistory = currentMessages.slice(0, msgIndex + 1)
+        const newHistory = messages.slice(0, msgIndex + 1)
         // 2. Update content
         newHistory[msgIndex] = { ...newHistory[msgIndex], content: newContent }
 
         // 3. Update Store
+        // This part needs to be careful. If activeId is not globalActiveId,
+        // directly setting state.messages might not be correct.
+        // The store's updateConversation should handle this.
         useChatStore.setState(state => {
             const updatedConversations = state.conversations.map(c =>
-                c.id === state.activeConversationId
+                c.id === activeId // Use activeId here
                     ? { ...c, messages: newHistory, lastUpdated: Date.now() }
                     : c
             )
-            return { messages: newHistory, conversations: updatedConversations }
+            // If the activeId is the global one, also update state.messages for consistency
+            // Otherwise, only update the specific conversation's messages
+            return {
+                ...state,
+                messages: state.activeConversationId === activeId ? newHistory : state.messages,
+                conversations: updatedConversations
+            }
         })
 
         // 4. Trigger submission
@@ -532,12 +570,13 @@ export function useChatStream() {
         }
 
         let assistantMsgId = generateId()
+        // @ts-ignore - addMessage needs to be updated to accept conversationId
         addMessage({
             id: assistantMsgId,
             role: "assistant",
             content: "",
             tokens: 0
-        })
+        }, activeId)
 
         let lastError: Error | null = null
         let success = false
@@ -560,7 +599,7 @@ export function useChatStream() {
                         body: JSON.stringify({
                             // Construct messages with System Prompt
                             messages: [
-                                ...(useChatStore.getState().systemPrompt ? [{ role: "system", content: useChatStore.getState().systemPrompt }] : []),
+                                ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), // Use directly
                                 ...historyForApi.map(m => ({ role: m.role, content: m.content }))
                             ],
                             providerId: apiKey.provider,
@@ -595,7 +634,8 @@ export function useChatStream() {
                                     if (data.isDone) continue
                                     if (data.content) {
                                         assistantContent += data.content
-                                        updateMessage(assistantMsgId, assistantContent)
+                                        // @ts-ignore - updateMessage needs to be updated to accept conversationId
+                                        updateMessage(assistantMsgId, assistantContent, undefined, activeId)
                                     }
                                 } catch (e) { }
                             }
@@ -607,10 +647,11 @@ export function useChatStream() {
                     const inputTokens = estimateTokens(newContent)
                     const outputTokens = estimateTokens(assistantContent)
 
-                    const freshKey = useChatStore.getState().apiKeys.find(k => k.id === apiKey.id) || apiKey
+                    const freshKey = apiKeys.find(k => k.id === apiKey.id) || apiKey // Use local apiKeys
                     updateApiKey(apiKey.id, { usage: (freshKey.usage || 0) + inputTokens + outputTokens })
 
-                    updateMessage(assistantMsgId, assistantContent, apiKey.provider)
+                    // @ts-ignore - updateMessage needs to be updated to accept conversationId
+                    updateMessage(assistantMsgId, assistantContent, apiKey.provider, activeId)
                     success = true
                     break
 
@@ -637,7 +678,8 @@ export function useChatStream() {
         if (!success) {
             const finalErrorMsg = lastError?.message || "Failed to regenerate."
             toast.error(finalErrorMsg)
-            updateMessage(assistantMsgId, "Error: " + finalErrorMsg)
+            // @ts-ignore - updateMessage needs to be updated to accept conversationId
+            updateMessage(assistantMsgId, "Error: " + finalErrorMsg, undefined, activeId)
         }
         setLoading(false)
     }
@@ -650,6 +692,7 @@ export function useChatStream() {
         handleEdit,
         stop,
         isLoading,
-        messages
+        messages // Return the filtered messages
     }
 }
+
