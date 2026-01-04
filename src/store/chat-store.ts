@@ -237,6 +237,18 @@ export const useChatStore = create<ChatStore>()(
             folders: [],
 
             createConversation: () => {
+                const { conversations, activeConversationId, splitViewMode, activePane, secondaryConversationId } = get()
+
+                // 1. REUSE LOGIC: If the currently active chat is empty, just stick with it.
+                // Determine target conversation based on active pane
+                const currentActiveId = (splitViewMode && activePane === 'secondary') ? secondaryConversationId : activeConversationId
+                const currentActiveConv = conversations.find(c => c.id === currentActiveId)
+
+                // If currently active is empty (and is actually "New Chat"), don't create another one.
+                if (currentActiveConv && currentActiveConv.messages.length === 0) {
+                    return // Already on a new chat
+                }
+
                 const newConv: Conversation = {
                     id: generateId(),
                     title: "New Chat",
@@ -295,16 +307,41 @@ export const useChatStore = create<ChatStore>()(
                 })
             },
             selectConversation: (id) => {
+                const { conversations, activeConversationId, splitViewMode, activePane, secondaryConversationId, deleteConversation } = get()
+
+                // CLEANUP LOGIC: If we are switching AWAY from an empty chat, delete it.
+                // Determine which ID we are switching FROM
+                const previousId = (splitViewMode && activePane === 'secondary') ? secondaryConversationId : activeConversationId
+
+                // If we are selecting the SAME chat, do nothing
+                if (previousId === id) return
+
                 set(state => {
+                    // Update state first
                     if (state.splitViewMode && state.activePane === 'secondary') {
                         return { secondaryConversationId: id }
-                    }
-                    return {
-                        activeConversationId: id,
-                        messages: state.conversations.find(c => c.id === id)?.messages || []
+                    } else {
+                        const selectedConv = state.conversations.find(c => c.id === id)
+                        return {
+                            activeConversationId: id,
+                            messages: selectedConv ? selectedConv.messages : []
+                        }
                     }
                 })
+
+                // After switching, check if the OLD one was empty and needs cleanup
+                if (previousId) {
+                    const prevConv = conversations.find(c => c.id === previousId)
+                    if (prevConv && prevConv.messages.length === 0) {
+                        // It was empty, delete it!
+                        // We must call deleteConversation from the store actions, but we are inside the store definition.
+                        // We can just call the shared deletion logic or calls deletion action.
+                        // Ideally we call the action to ensure DB sync removal.
+                        get().deleteConversation(previousId)
+                    }
+                }
             },
+
             addMessage: (message, conversationId) => {
                 set(state => {
                     const targetId = conversationId || state.activeConversationId

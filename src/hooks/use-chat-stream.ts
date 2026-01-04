@@ -1,7 +1,6 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useChatStore, Message } from "@/store/chat-store"
-import { formatTokenCount, estimateTokens } from "@/lib/token-utils"
 import { generateId } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -188,7 +187,6 @@ export function useChatStream(conversationId?: string) {
             id: generateId(),
             role: "user",
             content: input,
-            tokens: estimateTokens(input)
         }
 
         // @ts-ignore - addMessage needs to be updated to accept conversationId
@@ -297,27 +295,7 @@ export function useChatStream(conversationId?: string) {
                     }
 
                     // Finalize Token Usage
-                    const inputTokens = userMsg.tokens || 0
-                    const outputTokens = estimateTokens(assistantContent)
-                    const totalCost = inputTokens + outputTokens
 
-                    // Re-read usage in case it changed (unlikely in single thread but good practice)
-                    const freshKey = apiKeys.find(k => k.id === apiKey.id) || apiKey // Use local apiKeys
-                    const newUsage = (freshKey.usage || 0) + totalCost
-
-                    updateApiKey(apiKey.id, {
-                        usage: newUsage
-                    })
-
-                    // LIMIT WARNING LOGIC
-                    if (apiKey.limit && apiKey.limit > 0) {
-                        const percentage = newUsage / apiKey.limit
-                        if (percentage >= 0.9) {
-                            toast.error(`CRITICAL: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}(24h)`)
-                        } else if (percentage >= 0.8) {
-                            toast.warning(`Alert: You have used ${Math.floor(percentage * 100)}% of your limit for ${apiKey.provider}(24h)`)
-                        }
-                    }
 
                     // @ts-ignore - updateMessage needs to be updated to accept conversationId
                     updateMessage(assistantMsgId, assistantContent, apiKey.provider, effectiveConversationId)
@@ -487,11 +465,7 @@ export function useChatStream(conversationId?: string) {
 
                     if (!assistantContent) throw new Error("Empty response")
 
-                    const inputTokens = lastUserMsg.tokens || 0
-                    const outputTokens = estimateTokens(assistantContent)
 
-                    const freshKey = apiKeys.find(k => k.id === apiKey.id) || apiKey // Use local apiKeys
-                    updateApiKey(apiKey.id, { usage: (freshKey.usage || 0) + inputTokens + outputTokens })
 
                     // @ts-ignore - updateMessage needs to be updated to accept conversationId
                     updateMessage(assistantMsgId, assistantContent, apiKey.provider, activeId)
@@ -644,11 +618,8 @@ export function useChatStream(conversationId?: string) {
 
                     if (!assistantContent) throw new Error("Empty response")
 
-                    const inputTokens = estimateTokens(newContent)
-                    const outputTokens = estimateTokens(assistantContent)
+                    if (!assistantContent) throw new Error("Empty response")
 
-                    const freshKey = apiKeys.find(k => k.id === apiKey.id) || apiKey // Use local apiKeys
-                    updateApiKey(apiKey.id, { usage: (freshKey.usage || 0) + inputTokens + outputTokens })
 
                     // @ts-ignore - updateMessage needs to be updated to accept conversationId
                     updateMessage(assistantMsgId, assistantContent, apiKey.provider, activeId)

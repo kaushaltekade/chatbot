@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { MessageBubble } from "@/components/message-bubble"
 import { Send, RotateCcw, Square } from "lucide-react"
-import { estimateTokens } from "@/lib/token-utils"
 import { PromptLibrary } from "@/components/prompt-library"
 
 interface ChatPaneProps {
@@ -27,7 +26,9 @@ export function ChatPane({ conversationId, isActive, onFocus, className }: ChatP
 
     // Auto-scroll to bottom
     const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        if (messages.length > 0) {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        }
     }
 
     useEffect(() => {
@@ -122,13 +123,7 @@ export function ChatPane({ conversationId, isActive, onFocus, className }: ChatP
                             rows={1}
                         />
 
-                        {/* Token Counter */}
-                        <div className={cn(
-                            "absolute bottom-2 right-12 text-[10px] font-mono pointer-events-none transition-colors opacity-0 group-hover:opacity-100",
-                            estimateTokens(input) > 2000 ? "text-red-500 font-bold" : "text-muted-foreground/60"
-                        )}>
-                            {input.length > 0 && `${estimateTokens(input)} tokens`}
-                        </div>
+
 
                         {isLoading ? (
                             <Button
