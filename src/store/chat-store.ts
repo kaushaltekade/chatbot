@@ -31,6 +31,7 @@ export interface Conversation {
     title: string
     messages: Message[]
     lastUpdated: number
+    isPinned?: boolean
 }
 
 interface ChatStore {
@@ -50,6 +51,7 @@ interface ChatStore {
     // Actions
     createConversation: () => void
     deleteConversation: (id: string) => void
+    toggleConversationPin: (id: string) => void
     updateConversationTitle: (id: string, title: string) => void
     selectConversation: (id: string) => void
     addMessage: (message: Message) => void
@@ -69,6 +71,12 @@ interface ChatStore {
     setArtifactContent: (content: string) => void
     openArtifact: (content: string) => void
 
+    // PREFERENCES
+    smartRoutingEnabled: boolean
+    toggleSmartRouting: () => void
+    systemPrompt: string
+    setSystemPrompt: (prompt: string) => void
+
     setActiveArtifactTab: (tab: "code" | "preview") => void
     isArtifactFullscreen: boolean
     setIsArtifactFullscreen: (min: boolean) => void
@@ -76,12 +84,6 @@ interface ChatStore {
     // Data Management
     clearAllData: () => void
     syncWithSupabase: () => Promise<void> // Force sync
-
-    // PREFERENCES
-    smartRoutingEnabled: boolean
-    toggleSmartRouting: () => void
-    systemPrompt: string
-    setSystemPrompt: (prompt: string) => void
 }
 
 // Helpers for Supabase DB
@@ -95,7 +97,8 @@ async function upsertConversationToDB(conversation: Conversation) {
             id: conversation.id,
             user_id: user.id,
             title: conversation.title,
-            last_updated: new Date(conversation.lastUpdated).toISOString()
+            last_updated: new Date(conversation.lastUpdated).toISOString(),
+            is_pinned: conversation.isPinned || false
         })
     if (error) console.error("Failed to sync conversation:", error)
 }
@@ -201,6 +204,16 @@ export const useChatStore = create<ChatStore>()(
                     messages: []
                 }))
                 upsertConversationToDB(newConv)
+            },
+            toggleConversationPin: (id) => {
+                set(state => {
+                    const updatedConversations = state.conversations.map(c =>
+                        c.id === id ? { ...c, isPinned: !c.isPinned } : c
+                    )
+                    const conv = updatedConversations.find(c => c.id === id)
+                    if (conv) upsertConversationToDB(conv)
+                    return { conversations: updatedConversations }
+                })
             },
             deleteConversation: (id) => {
                 set(state => {
