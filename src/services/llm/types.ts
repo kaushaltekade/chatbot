@@ -17,7 +17,7 @@ export interface LLMProvider {
     id: string
     name: string
 
-    estimateTokens(text: string): number
+
 
     streamChat(
         messages: Message[],

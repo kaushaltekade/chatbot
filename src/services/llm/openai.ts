@@ -1,5 +1,5 @@
 import { LLMProvider, Message, StreamChunk } from "./types"
-import { estimateTokens } from "@/lib/token-utils"
+
 
 export class OpenAIProvider implements LLMProvider {
     id = "openai"
@@ -16,9 +16,7 @@ export class OpenAIProvider implements LLMProvider {
         if (config?.headers) this.extraHeaders = config.headers
     }
 
-    estimateTokens(text: string): number {
-        return estimateTokens(text)
-    }
+
 
     async streamChat(
         messages: Message[],

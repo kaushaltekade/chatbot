@@ -1,5 +1,5 @@
 import { LLMProvider, Message, StreamChunk } from "./types"
-import { estimateTokens } from "@/lib/token-utils"
+
 
 export class AnthropicProvider implements LLMProvider {
     id = "anthropic"
@@ -13,9 +13,7 @@ export class AnthropicProvider implements LLMProvider {
         if (config?.name) this.name = config.name
     }
 
-    estimateTokens(text: string): number {
-        return estimateTokens(text)
-    }
+
 
     async streamChat(
         messages: Message[],

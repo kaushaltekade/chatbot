@@ -1,13 +1,11 @@
 import { LLMProvider, Message, StreamChunk } from "./types"
-import { estimateTokens } from "@/lib/token-utils"
+
 
 export class GeminiProvider implements LLMProvider {
     id = "gemini"
     name = "Google Gemini 2.5 Flash"
 
-    estimateTokens(text: string): number {
-        return estimateTokens(text)
-    }
+
 
     async streamChat(
         messages: Message[],
