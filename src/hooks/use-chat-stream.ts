@@ -189,14 +189,14 @@ export function useChatStream(conversationId?: string) {
             content: input,
         }
 
-        // @ts-ignore - addMessage needs to be updated to accept conversationId
+
         addMessage(userMsg, effectiveConversationId)
         setInput("")
         setLoading(true)
 
         // Initial Assistant Message placeholder
         let assistantMsgId = generateId()
-        // @ts-ignore - addMessage needs to be updated to accept conversationId
+
         addMessage({
             id: assistantMsgId,
             role: "assistant",
@@ -280,7 +280,7 @@ export function useChatStream(conversationId?: string) {
 
                                     if (data.content) {
                                         assistantContent += data.content
-                                        // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
                                         updateMessage(assistantMsgId, assistantContent, apiKey.provider, effectiveConversationId)
                                     }
                                 } catch (e) {
@@ -297,7 +297,7 @@ export function useChatStream(conversationId?: string) {
                     // Finalize Token Usage
 
 
-                    // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
                     updateMessage(assistantMsgId, assistantContent, apiKey.provider, effectiveConversationId)
                     success = true
                     break // Stop loop on success
@@ -324,10 +324,10 @@ export function useChatStream(conversationId?: string) {
                     const nextProvider = keysToTry[keysToTry.indexOf(apiKey) + 1].provider
 
                     // Cleanup failed message
-                    // @ts-ignore - deleteMessage needs to be updated to accept conversationId
+
                     deleteMessage(assistantMsgId, effectiveConversationId)
                     assistantMsgId = generateId()
-                    // @ts-ignore - addMessage needs to be updated to accept conversationId
+
                     addMessage({
                         id: assistantMsgId,
                         role: "assistant",
@@ -347,7 +347,7 @@ export function useChatStream(conversationId?: string) {
         if (!success) {
             const finalErrorMsg = lastError?.message || "All providers failed."
             toast.error(finalErrorMsg)
-            // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
             updateMessage(assistantMsgId, "Error: " + finalErrorMsg, undefined, effectiveConversationId)
         }
 
@@ -364,7 +364,7 @@ export function useChatStream(conversationId?: string) {
         if (lastMessage.role !== 'assistant') return
 
         // 1. Delete the last assistant message
-        // @ts-ignore - deleteMessage needs to be updated to accept conversationId
+
         deleteMessage(lastMessage.id, activeId)
 
         // 2. Find the last user message to use as prompt
@@ -385,7 +385,7 @@ export function useChatStream(conversationId?: string) {
 
         // Placeholder for new response
         let assistantMsgId = generateId()
-        // @ts-ignore - addMessage needs to be updated to accept conversationId
+
         addMessage({
             id: assistantMsgId,
             role: "assistant",
@@ -455,7 +455,7 @@ export function useChatStream(conversationId?: string) {
                                     if (data.isDone) continue
                                     if (data.content) {
                                         assistantContent += data.content
-                                        // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
                                         updateMessage(assistantMsgId, assistantContent, undefined, activeId)
                                     }
                                 } catch (e) { }
@@ -467,7 +467,7 @@ export function useChatStream(conversationId?: string) {
 
 
 
-                    // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
                     updateMessage(assistantMsgId, assistantContent, apiKey.provider, activeId)
                     success = true
                     break
@@ -495,7 +495,7 @@ export function useChatStream(conversationId?: string) {
         if (!success) {
             const finalErrorMsg = lastError?.message || "Failed to regenerate."
             toast.error(finalErrorMsg)
-            // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
             updateMessage(assistantMsgId, "Error: " + finalErrorMsg, undefined, activeId)
         }
         setLoading(false)
@@ -544,7 +544,7 @@ export function useChatStream(conversationId?: string) {
         }
 
         let assistantMsgId = generateId()
-        // @ts-ignore - addMessage needs to be updated to accept conversationId
+
         addMessage({
             id: assistantMsgId,
             role: "assistant",
@@ -608,7 +608,7 @@ export function useChatStream(conversationId?: string) {
                                     if (data.isDone) continue
                                     if (data.content) {
                                         assistantContent += data.content
-                                        // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
                                         updateMessage(assistantMsgId, assistantContent, undefined, activeId)
                                     }
                                 } catch (e) { }
@@ -618,10 +618,8 @@ export function useChatStream(conversationId?: string) {
 
                     if (!assistantContent) throw new Error("Empty response")
 
-                    if (!assistantContent) throw new Error("Empty response")
 
 
-                    // @ts-ignore - updateMessage needs to be updated to accept conversationId
                     updateMessage(assistantMsgId, assistantContent, apiKey.provider, activeId)
                     success = true
                     break
@@ -649,7 +647,7 @@ export function useChatStream(conversationId?: string) {
         if (!success) {
             const finalErrorMsg = lastError?.message || "Failed to regenerate."
             toast.error(finalErrorMsg)
-            // @ts-ignore - updateMessage needs to be updated to accept conversationId
+
             updateMessage(assistantMsgId, "Error: " + finalErrorMsg, undefined, activeId)
         }
         setLoading(false)
