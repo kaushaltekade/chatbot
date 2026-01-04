@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useState, useEffect, useCallback, useRef } from "react"
 
 import { ChatSidebar } from "@/components/chat-sidebar"
@@ -14,6 +15,8 @@ import { MessageBubble } from "@/components/message-bubble"
 import { Menu, Send, Bot, User, RotateCcw, Square } from "lucide-react"
 import { estimateTokens } from "@/lib/token-utils"
 import { ResizableArtifactPanel } from "@/components/resizable-artifact-panel"
+import { PromptLibrary } from "@/components/prompt-library"
+import { AnimatedTitle } from "@/components/animated-title"
 
 // ... imports
 
@@ -62,7 +65,7 @@ export default function Home() {
               <Menu className="w-5 h-5" />
             </Button>
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-              <span className="font-semibold text-lg opacity-90">AAIOP</span>
+              <AnimatedTitle />
             </div>
           </header>
 
@@ -70,11 +73,24 @@ export default function Home() {
             <ScrollArea className="flex-1">
               <div className="max-w-5xl mx-auto w-full px-4 py-8 space-y-2">
                 {messages.length === 0 && (
-                  <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-4">
-                    <div className="bg-primary/10 p-4 rounded-full">
-                      <Bot className="w-8 h-8 text-primary" />
+                  <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-8 animate-in fade-in duration-500 slide-in-from-bottom-4">
+                    <div className="space-y-4">
+                      <div className="bg-primary/10 p-4 rounded-full inline-block">
+                        <Image src="/file.svg" alt="Logo" width={48} height={48} className="w-20 h-12" />
+                      </div>
+                      <h2 className="text-2xl font-semibold">How can I help you today?</h2>
                     </div>
-                    <h2 className="text-2xl font-semibold">How can I help you today?</h2>
+
+                    <PromptLibrary
+                      className="w-full text-left"
+                      onSelect={(content) => {
+                        setInput(content)
+                        // Optional: Focus textarea
+                        if (textareaRef.current) {
+                          textareaRef.current.focus()
+                        }
+                      }}
+                    />
                   </div>
                 )}
 

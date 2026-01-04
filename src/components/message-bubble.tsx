@@ -208,9 +208,9 @@ export function MessageBubble({ id, role, content, provider, onEdit }: MessageBu
                             components={{
                                 code({ node, inline, className, children, ...props }: any) {
                                     const match = /language-(\w+)/.exec(className || '')
-                                    return !inline && match ? (
+                                    return !inline ? (
                                         <CodeBlock
-                                            language={match[1]}
+                                            language={match ? match[1] : 'text'}
                                             value={String(children).replace(/\n$/, '')}
                                             isUser={isUser}
                                         />

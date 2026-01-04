@@ -26,12 +26,19 @@ export interface Message {
     provider?: string
 }
 
+export interface Folder {
+    id: string
+    name: string
+    createdAt: number
+}
+
 export interface Conversation {
     id: string
     title: string
     messages: Message[]
     lastUpdated: number
     isPinned?: boolean
+    folderId?: string
 }
 
 interface ChatStore {
@@ -47,6 +54,7 @@ interface ChatStore {
     activeConversationId: string | null
     messages: Message[]
     isLoading: boolean
+    folders: Folder[]
 
     // Actions
     createConversation: () => void
@@ -58,6 +66,12 @@ interface ChatStore {
     updateMessage: (id: string, content: string, provider?: string) => void
     deleteMessage: (id: string) => void
     setLoading: (loading: boolean) => void
+
+    // Folder Actions
+    createFolder: (name: string) => void
+    deleteFolder: (id: string) => void
+    renameFolder: (id: string, name: string) => void
+    moveChatToFolder: (chatId: string, folderId: string | null) => void
 
     // Basic UI state
     isSidebarOpen: boolean
@@ -87,6 +101,27 @@ interface ChatStore {
 }
 
 // Helpers for Supabase DB
+async function upsertFolderToDB(folder: Folder) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase
+        .from('folders')
+        .upsert({
+            id: folder.id,
+            user_id: user.id,
+            name: folder.name,
+            created_at: new Date(folder.createdAt).toISOString()
+        })
+    if (error) console.error("Failed to sync folder:", error)
+}
+
+async function deleteFolderFromDB(id: string) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('folders').delete().eq('id', id)
+}
+
 async function upsertConversationToDB(conversation: Conversation) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -98,7 +133,8 @@ async function upsertConversationToDB(conversation: Conversation) {
             user_id: user.id,
             title: conversation.title,
             last_updated: new Date(conversation.lastUpdated).toISOString(),
-            is_pinned: conversation.isPinned || false
+            is_pinned: conversation.isPinned || false,
+            folder_id: conversation.folderId || null
         })
     if (error) console.error("Failed to sync conversation:", error)
 }
@@ -190,6 +226,7 @@ export const useChatStore = create<ChatStore>()(
             activeConversationId: null,
             messages: [],
             isLoading: false,
+            folders: [],
 
             createConversation: () => {
                 const newConv: Conversation = {
@@ -301,6 +338,50 @@ export const useChatStore = create<ChatStore>()(
                     return { messages: newMessages, conversations: updatedConversations }
                 })
             },
+
+            // Folder Actions
+            createFolder: (name) => set(state => {
+                const newFolder: Folder = {
+                    id: generateId(),
+                    name,
+                    createdAt: Date.now()
+                }
+                upsertFolderToDB(newFolder)
+                return { folders: [newFolder, ...state.folders] }
+            }),
+            deleteFolder: (id) => set(state => {
+                // Move chats in this folder back to root
+                const updatedConversations = state.conversations.map(c =>
+                    c.folderId === id ? { ...c, folderId: undefined } : c
+                )
+                // Sync updated conversations to DB
+                updatedConversations.forEach(c => {
+                    if (c.folderId === undefined && state.conversations.find(old => old.id === c.id)?.folderId === id) {
+                        upsertConversationToDB(c)
+                    }
+                })
+
+                deleteFolderFromDB(id)
+                return {
+                    folders: state.folders.filter(f => f.id !== id),
+                    conversations: updatedConversations
+                }
+            }),
+            renameFolder: (id, name) => set(state => {
+                const updatedFolders = state.folders.map(f => f.id === id ? { ...f, name } : f)
+                const folder = updatedFolders.find(f => f.id === id)
+                if (folder) upsertFolderToDB(folder)
+                return { folders: updatedFolders }
+            }),
+            moveChatToFolder: (chatId, folderId) => set(state => {
+                const updatedConversations = state.conversations.map(c =>
+                    c.id === chatId ? { ...c, folderId: folderId || undefined } : c
+                )
+                const conv = updatedConversations.find(c => c.id === chatId)
+                if (conv) upsertConversationToDB(conv)
+                return { conversations: updatedConversations }
+            }),
+
             setLoading: (loading) => set({ isLoading: loading }),
 
             isSidebarOpen: true,
@@ -349,6 +430,21 @@ export const useChatStore = create<ChatStore>()(
                     label: k.label
                 })) || []
 
+                // Fetch Folders
+                const { data: folders, error: folderError } = await supabase
+                    .from('folders')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+
+                if (folderError) console.error("Error fetching folders:", folderError)
+
+                const remoteFolders: Folder[] = folders?.map((f: any) => ({
+                    id: f.id,
+                    name: f.name,
+                    createdAt: new Date(f.created_at).getTime()
+                })) || []
+
                 // Fetch Conversations
                 const { data: convs, error: convError } = await supabase
                     .from('conversations')
@@ -361,8 +457,7 @@ export const useChatStore = create<ChatStore>()(
                     return
                 }
 
-                // For each conversation, fetch messages (this is a bit heavy, optimization would be to load only active or lazy load)
-                // For now, let's load all to be synced with local Store style
+                // For each conversation, fetch messages
                 const loadedConversations: Conversation[] = []
 
                 for (const c of convs) {
@@ -376,6 +471,8 @@ export const useChatStore = create<ChatStore>()(
                         id: c.id,
                         title: c.title || "New Chat",
                         lastUpdated: new Date(c.last_updated).getTime(),
+                        isPinned: c.is_pinned,
+                        folderId: c.folder_id, // Sync folder id
                         messages: msgs?.map((m: any) => ({
                             id: m.id,
                             role: m.role,
@@ -385,12 +482,13 @@ export const useChatStore = create<ChatStore>()(
                     })
                 }
 
-                if (loadedConversations.length > 0 || remoteKeys.length > 0) {
+                if (loadedConversations.length > 0 || remoteKeys.length > 0 || remoteFolders.length > 0) {
                     set(state => ({
                         conversations: loadedConversations.length > 0 ? loadedConversations : state.conversations,
                         activeConversationId: loadedConversations.length > 0 ? loadedConversations[0].id : state.activeConversationId,
                         messages: loadedConversations.length > 0 ? loadedConversations[0].messages : state.messages,
-                        apiKeys: remoteKeys.length > 0 ? remoteKeys : state.apiKeys
+                        apiKeys: remoteKeys.length > 0 ? remoteKeys : state.apiKeys,
+                        folders: remoteFolders.length > 0 ? remoteFolders : state.folders
                     }))
                     toast.success("Sync completed")
                 }
@@ -407,6 +505,7 @@ export const useChatStore = create<ChatStore>()(
             partialize: (state) => ({
                 apiKeys: state.apiKeys,
                 conversations: state.conversations,
+                folders: state.folders,
                 smartRoutingEnabled: state.smartRoutingEnabled,
                 systemPrompt: state.systemPrompt
             }),
