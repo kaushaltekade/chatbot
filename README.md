@@ -356,7 +356,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 📧 Support
 
-For support, email kaushaltekade@example.com or open an issue on GitHub.
+For support, email koushaltekade89@example.com or open an issue on GitHub.
 
 ---
 
